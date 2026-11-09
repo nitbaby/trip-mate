@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     live_mode: str = "mock"  # mock | real
-    embeddings: str = "fastembed"  # fastembed | hash
+    embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
 
     @property

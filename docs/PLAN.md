@@ -21,7 +21,7 @@ docs/        spec, overview, this plan
 | Topic | Choice |
 |---|---|
 | Vector store | Chroma (persistent, `data/chroma`) |
-| Embeddings | Local `fastembed` (BAAI/bge-small-en-v1.5); `EMBEDDINGS=hash` for offline tests only |
+| Embeddings | `EMBEDDINGS=onnx` (default): Chroma's bundled all-MiniLM-L6-v2, downloads once from AWS S3 to `~/.cache/chroma`. `fastembed` needs huggingface.co (blocked on this network). `hash` = tests only. |
 | LLM | Claude via Anthropic SDK tool use; model id from `ANTHROPIC_MODEL` env (default `claude-sonnet-5-5`) |
 | API key | `ANTHROPIC_API_KEY` in root `.env` (gitignored). Never read/print/commit it. |
 | Weather / Places / FX | Open-Meteo / OpenStreetMap (Overpass+Nominatim) / frankfurter.app — no keys |
@@ -69,4 +69,6 @@ PDF parsing quality (samples are mostly text); confidence thresholds need eval t
 - Keep logs free of raw document text; sensitive values only leave the server via the reveal endpoint.
 
 ## Decisions/Notes log
-- (append here as work proceeds)
+- 2026-11-09: huggingface.co and GCS return 403 on this network, so fastembed ingestion failed (`Could not load model ... from any source`). Switched default to Chroma ONNX MiniLM (S3 reachable). Existing `.env` files must set `EMBEDDINGS=onnx`.
+- 2026-11-09: added `samples/` docs; fixed booking-reference masking regex bug found by uploading them.
+- Repo moved to `/Users/A-7878/Learning/trip-mate`. Remote `origin` = github.com/nitbaby/trip-mate; first push failed with 403 'account suspended' (unresolved).
