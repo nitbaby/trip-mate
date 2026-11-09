@@ -35,13 +35,13 @@ docs/        spec, overview, this plan
 ## Phases and status
 - [x] **Phase 0 – Scaffold**: git init, folders, Makefile, `.env.example`, README, docs moved.
 - [x] **Phase 1 – Backend core** (commit 46fa205): trips + itinerary CRUD (conflict detection, `source=agent`), document upload + background ingestion (parse → chunk → classify → key facts → masking → Chroma), reveal endpoint (DOC-06), chunk/Source Drawer endpoint. 7 tests passing (`make test`).
-- [ ] **Phase 2 – RAG, confidence, agent**
+- [ ] **Phase 2 – RAG, confidence, agent** (NEXT. Build the agent on `app/mcp_client.py`: `McpToolClient().list_tools()` already returns Anthropic tool format; inject `trip_id` into tool args server-side. Samples already exist in `samples/`.)
   - `samples/` documents (hotel confirmation w/ check-out + breakfast, flight itinerary, Japan medication rules).
   - `search_docs` + confidence level (high/low/none from top score + agreement); thresholds tuned later with eval set.
   - Agent loop with Claude tool use: max 6 tools/turn, 30 external calls/session; SSE `POST /api/trips/{id}/chat` emitting the `ChatEvent` types in spec §5.2 (token, tool_start, tool_result, citation, confidence, verify, itinerary_updated, error, done); persist conversations/messages.
   - Guardrails per spec §7.2: citation or low-confidence; verify event for visa/medication/customs/currency; "I couldn't find it" + official-source suggestion.
   - Exit: demo flows 1 (check-out/breakfast) and 3 (medication + verify badge) work via curl; tests use a fake Claude client.
-- [ ] **Phase 3 – MCP server + live tools**
+- [x] **Phase 3 – MCP server + live tools** (done before Phase 2; no dependency on the agent loop. `search_docs` returns raw scores; the confidence level is added in Phase 2.)
   - MCP server in `mcp-server/` exposing `search_docs`, `read_itinerary`, `write_itinerary` (sets `source=agent`), `get_flight_status`, `get_weather`, `search_places`, `convert_currency`; backend uses an MCP client.
   - `api_cache` TTL caching, last-updated timestamps, mock/real providers, `GET /api/trips/{id}/places`, `GET /api/trips/{id}/status` (integration health), undo support for agent writes.
   - Exit: flows 2, 4, 5 work via curl.
@@ -69,6 +69,7 @@ PDF parsing quality (samples are mostly text); confidence thresholds need eval t
 - Keep logs free of raw document text; sensitive values only leave the server via the reveal endpoint.
 
 ## Decisions/Notes log
+- 2026-11-09 Phase 3 built: `app/tools/` (flights mock-only, weather Open-Meteo, places mock fixtures / Nominatim, fx Frankfurter, TTL `api_cache` with stale-on-failure), `app/services/itinerary.py` (shared by REST and tools; `agent_write` sets source=agent and logs undo), `POST /api/trips/{id}/undo/{undoId}`, `GET /api/trips/{id}/places`, `GET /api/trips/{id}/status`, `mcp-server/tripmate_mcp/server.py` (FastMCP stdio, 7 tools; pinned `mcp<2`), `app/mcp_client.py` (forwards only TRIPMATE_DATA_DIR/LIVE_MODE/EMBEDDINGS env to the subprocess, never the API key). Real mode verified for weather + fx; real places is Nominatim only (no ratings/hours/diet filter; Overpass is unreachable here). Mock flight JL44 is delayed 35 min (demo flow 2). 17 tests.
 - 2026-11-09: huggingface.co and GCS return 403 on this network, so fastembed ingestion failed (`Could not load model ... from any source`). Switched default to Chroma ONNX MiniLM (S3 reachable). Existing `.env` files must set `EMBEDDINGS=onnx`.
 - 2026-11-09: added `samples/` docs; fixed booking-reference masking regex bug found by uploading them.
 - Repo moved to `/Users/A-7878/Learning/trip-mate`. Remote `origin` = github.com/nitbaby/trip-mate; first push failed with 403 'account suspended' (unresolved).

@@ -15,4 +15,4 @@ make test
 ## Status
 - [x] Phase 0 scaffold
 - [x] Phase 1 backend core (trips, documents ingestion, itinerary)
-- [ ] Phase 2 RAG + agent · [ ] Phase 3 MCP + live tools · [ ] Phase 4 PWA · [ ] Phase 5 offline · [ ] Phase 6 hardening
+- [x] Phase 3 MCP + live tools · [ ] Phase 2 RAG + agent · [ ] Phase 4 PWA · [ ] Phase 5 offline · [ ] Phase 6 hardening

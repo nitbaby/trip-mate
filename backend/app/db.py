@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS undo_log (
+  id TEXT PRIMARY KEY, trip_id TEXT NOT NULL, action TEXT NOT NULL, item_id TEXT NOT NULL,
+  before TEXT, created_at TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS api_cache (
   key TEXT PRIMARY KEY, payload TEXT NOT NULL, fetched_at TEXT NOT NULL, ttl_seconds INTEGER NOT NULL);
 """

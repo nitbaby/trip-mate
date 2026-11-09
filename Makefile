@@ -2,7 +2,7 @@ PY=.venv/bin
 
 setup:
 	python3 -m venv .venv
-	$(PY)/pip install -e "backend[dev]"
+	$(PY)/pip install -e "backend[dev]" -e mcp-server
 	@test -f .env || cp .env.example .env
 
 dev-backend:
