@@ -1,0 +1,19 @@
+E-TICKET ITINERARY AND RECEIPT
+
+Passenger: Alex Morgan
+Booking reference: QX93LM
+Passport: P48213907
+
+OUTBOUND
+Flight: JL 44
+Departs: London Heathrow (LHR) Terminal 3, 30 November 2026, 6:00 PM
+Arrives: Tokyo Haneda (HND) Terminal 3, 1 December 2026, 2:25 PM
+Class: Economy. Baggage: 1 checked bag of 23 kg, 1 cabin bag of 10 kg.
+
+RETURN
+Flight: JL 43
+Departs: Tokyo Haneda (HND), 6 December 2026, 11:55 AM
+Arrives: London Heathrow (LHR), 6 December 2026, 3:50 PM
+
+Check-in closes 60 minutes before departure for international flights.
+Seat selection and special meals can be changed online until 24 hours before departure.

@@ -6,7 +6,7 @@ FACT_PATTERNS = [
     ("Check-in", r"check-?in(?: time)?\s*[:\-]?\s*(?:from\s*)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2})"),
     ("Check-out", r"check-?out(?: time)?\s*[:\-]?\s*(?:by|before\s*)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2})"),
     ("Breakfast", r"(breakfast[^.\n]{0,60})"),
-    ("Hotel", r"(?:hotel|property)\s*[:\-]\s*([^\n]{3,60})"),
+    ("Hotel", r"^\s*(?:hotel|property)\s*:\s*([^\n]{3,60})"),
     ("Flight", r"\b(?:flight)\s*[:#]?\s*([A-Z]{2}\s?\d{2,4})\b"),
 ]
 
@@ -21,7 +21,7 @@ def extract_key_facts(text: str) -> list[dict]:
     """Facts as cards. Sensitive raw values stay server-side; public_facts() strips them for the API."""
     facts = []
     for label, rx in FACT_PATTERNS:
-        m = re.search(rx, text, re.IGNORECASE)
+        m = re.search(rx, text, re.IGNORECASE | re.MULTILINE)
         if m:
             facts.append({"label": label, "value": m.group(1).strip(), "sensitive": False})
     for f in find_sensitive(text):

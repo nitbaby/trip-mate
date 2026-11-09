@@ -3,7 +3,7 @@ import re
 # (label, regex, group index to mask)
 PATTERNS = [
     ("passport_number", re.compile(r"(?i)passport(?:\s*(?:no\.?|number|#))?\s*[:#]?\s*([A-Z0-9]{6,9})\b"), 1),
-    ("booking_reference", re.compile(r"(?i)(?:confirmation|booking|reservation|reference|PNR)\s*(?:no\.?|number|code|ref|#)?\s*[:#]?\s*([A-Z0-9]{5,10})\b"), 1),
+    ("booking_reference", re.compile(r"(?i)(?:confirmation|booking|reservation|reference|PNR)\s*(?:no\.?|number|code|ref|#)?\s*[:#]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{5,10})\b"), 1),
     ("card_number", re.compile(r"\b((?:\d[ -]?){12,15}\d)\b"), 1),
 ]
 
@@ -18,9 +18,6 @@ def find_sensitive(text: str) -> list[dict]:
     for label, rx, g in PATTERNS:
         for m in rx.finditer(text):
             val = m.group(g)
-            # booking refs must contain a digit to avoid matching plain words
-            if label == "booking_reference" and not any(c.isdigit() for c in val):
-                continue
             if (label, val) in seen:
                 continue
             seen.add((label, val))
