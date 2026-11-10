@@ -2,6 +2,7 @@
 from .. import vectors
 from ..db import connect
 from ..errors import not_found
+from ..ingest.mask import redact
 from ..services import itinerary as itin
 from . import flights, fx, places, weather
 
@@ -13,6 +14,7 @@ def search_docs(trip_id: str, query: str, doc_type: str | None = None, k: int = 
             r = c.execute("""SELECT ch.page, d.filename FROM chunks ch JOIN documents d ON d.id=ch.document_id
                              WHERE ch.id=?""", (h["chunk_id"],)).fetchone()
             h["page"], h["document_name"] = (r["page"], r["filename"]) if r else (None, None)
+            h["text"] = redact(h["text"])  # sensitive values never reach the model (spec 8: redact before cloud)
     return {"query": query, "results": hits}
 
 

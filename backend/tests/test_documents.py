@@ -67,3 +67,30 @@ def test_delete_document(client):
     wait_ready(client, tid, did)
     assert client.delete(f"/api/trips/{tid}/documents/{did}").status_code == 204
     assert client.get(f"/api/trips/{tid}").json()["documents"] == []
+
+
+def test_chunk_and_search_text_are_redacted(client):
+    from app.tools import impl
+
+    tid = mk(client)
+    did = client.post(f"/api/trips/{tid}/documents", files={"file": ("hotel.txt", HOTEL)}).json()["id"]
+    wait_ready(client, tid, did)
+    hit = impl.search_docs(tid, "confirmation passport")["results"][0]
+    assert "ABC12345" not in hit["text"] and "X1234567" not in hit["text"] and "Check-out" in hit["text"]
+    c = client.get(f"/api/documents/{did}/chunks/{hit['chunk_id']}").json()
+    assert "X1234567" not in str(c) and "ABC12345" not in str(c)
+
+
+def test_relative_data_dir_is_anchored_to_repo_root(monkeypatch):
+    from app import config
+
+    monkeypatch.setenv("TRIPMATE_DATA_DIR", "./data-reltest")
+    monkeypatch.chdir("/")
+    config.get_settings.cache_clear()
+    try:
+        assert config.get_settings().tripmate_data_dir == (config.REPO_ROOT / "data-reltest").resolve()
+    finally:
+        import shutil
+
+        shutil.rmtree(config.REPO_ROOT / "data-reltest", ignore_errors=True)
+        config.get_settings.cache_clear()

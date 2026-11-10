@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
-    s.tripmate_data_dir = Path(s.tripmate_data_dir).resolve()
+    d = Path(s.tripmate_data_dir).expanduser()
+    # relative paths are anchored at the repo root, never the process cwd (backend/ vs repo root differ)
+    s.tripmate_data_dir = (d if d.is_absolute() else REPO_ROOT / d).resolve()
     s.tripmate_data_dir.mkdir(parents=True, exist_ok=True)
     s.uploads_dir.mkdir(parents=True, exist_ok=True)
     return s

@@ -8,6 +8,7 @@ from .. import vectors
 from ..config import get_settings
 from ..db import connect, new_id, now_iso
 from ..errors import ApiError, not_found
+from ..ingest.mask import redact
 from ..ingest.pipeline import ingest_document
 
 router = APIRouter(tags=["documents"])
@@ -57,7 +58,8 @@ def chunk(doc_id: str, chunk_id: str):
         around = [dict(x) for x in c.execute(
             "SELECT id,page,text FROM chunks WHERE document_id=? AND page=? ORDER BY rowid", (doc_id, r["page"]))]
         return {"chunk_id": r["id"], "document_id": doc_id, "document_name": r["filename"],
-                "page": r["page"], "text": r["text"], "surrounding": around}
+                "page": r["page"], "text": redact(r["text"]),
+                "surrounding": [{**a, "text": redact(a["text"])} for a in around]}
 
 
 @router.get("/api/documents/{doc_id}/facts/{index}/reveal")
