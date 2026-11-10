@@ -1,7 +1,7 @@
 import type { AssistantMessage, ChatEvent } from "../types";
 
 export const newAssistant = (id: string): AssistantMessage => ({
-  id, role: "assistant", text: "", tools: [], citations: {}, itinerary: [], status: "streaming",
+  id, role: "assistant", text: "", tools: [], agents: [], citations: {}, itinerary: [], status: "streaming",
 });
 
 /** Pure: fold one streamed event into the assistant message (spec 5.2 client behaviour). */
@@ -9,8 +9,14 @@ export function applyEvent(m: AssistantMessage, e: ChatEvent): AssistantMessage 
   switch (e.type) {
     case "token":
       return { ...m, text: m.text + e.text };
+    case "agent_start":
+      return { ...m, agents: [...m.agents, { name: e.agent, label: e.label, status: "running" }] };
+    case "agent_end":
+      return { ...m, agents: m.agents.map((a) => (a.name === e.agent ? { ...a, status: "done" } : a)) };
+    case "verified":
+      return { ...m, verification: { checked: e.checked, unsupported: e.unsupported } };
     case "tool_start":
-      return { ...m, tools: [...m.tools, { id: e.toolCallId, name: e.name, label: e.label, status: "running" }] };
+      return { ...m, tools: [...m.tools, { id: e.toolCallId, name: e.name, label: e.label, status: "running", agent: e.agent }] };
     case "tool_result":
       return {
         ...m,

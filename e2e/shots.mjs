@@ -2,6 +2,7 @@
 import { chromium } from "@playwright/test";
 import path from "node:path";
 const out = process.argv[2] ?? "/tmp/tm-ui/shots";
+const BASE = process.env.BASE_URL ?? "http://localhost:5173";
 const samples = path.resolve("../samples");
 const browser = await chromium.launch({ channel: "chrome" });
 const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: "light" });
@@ -10,7 +11,7 @@ page.on("pageerror", (e) => console.log("PAGE ERROR:", e.message));
 page.on("console", (m) => m.type() === "error" && console.log("CONSOLE ERROR:", m.text()));
 const shot = (n) => page.screenshot({ path: `${out}/${n}.png` });
 
-await page.goto("http://localhost:5173/");
+await page.goto(`${BASE}/`);
 await shot("01-trips-empty");
 await page.getByRole("button", { name: "New trip" }).click();
 await page.getByLabel("Name").fill("Tokyo Dec 2026");
@@ -64,7 +65,7 @@ await ctx.close();
 
 const dark = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: 2, isMobile: true, colorScheme: "dark" });
 const p2 = await dark.newPage();
-await p2.goto("http://localhost:5173/");
+await p2.goto(`${BASE}/`);
 await p2.getByRole("link").first().click();
 await p2.getByRole("link", { name: /Chat/ }).click();
 await p2.waitForTimeout(800);

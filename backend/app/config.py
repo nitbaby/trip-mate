@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     conf_high: float = 0.45
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
     conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
+    agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
     max_tools_per_turn: int = 6
     max_external_calls_per_session: int = 30
 

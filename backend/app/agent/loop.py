@@ -1,8 +1,15 @@
-"""Agent loop: one chat turn -> stream of typed ChatEvents (spec 5.2)."""
+"""Agent runtime: one chat turn -> stream of typed ChatEvents (spec 5.2).
+
+Two modes share the same agent runner and guardrails:
+  single: one agent with all tools (the original design)
+  multi:  router -> specialist agents (parallel if more than one) -> composer -> citation verifier
+"""
+import asyncio
 import json
 import re
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 import anthropic
 
@@ -10,9 +17,12 @@ from ..config import get_settings
 from ..db import connect, new_id, now_iso
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
-from .prompt import system_prompt
+from .prompt import composer_prompt, role_prompt, system_prompt
+from .router import AGENTS, route
+from .verify import verify_citations
 
 MAX_ITERATIONS = 8
+SPECIALIST_ITERATIONS = 5
 HISTORY_LIMIT = 20
 RANK = {"none": 0, "low": 1, "high": 2}
 
@@ -69,100 +79,222 @@ def _bump_external(conn, cid):
     conn.commit()
 
 
-async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub,
-                   prefs: dict | None = None) -> AsyncIterator[dict]:
+@dataclass
+class Turn:
+    """State shared by every agent in one chat turn. Budgets and citation numbering are turn-wide."""
+    trip: dict
+    conversation_id: str
+    conn: object
+    hub: object
+    tools: list[dict]
+    with_trip: set[str]
+    prefs: dict | None = None
+    refs: dict[int, dict] = field(default_factory=dict)       # [n] -> citation target + passage text (server side only)
+    evidence: list[str] = field(default_factory=list)         # live tool results, used by the verifier
+    conf_levels: list[str] = field(default_factory=list)
+    tool_count: int = 0
+    llm_calls: int = 0
+    wrote_itinerary: bool = False
+    streamed: str = ""                                          # everything streamed to the user as tokens
+
+
+async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed: set[str] | None, messages: list[dict],
+                    stream_text: bool, out: dict, max_iter: int = MAX_ITERATIONS) -> AsyncIterator[dict]:
+    """Run one agent to completion. Yields events; the agent's answer is left in out["text"]."""
     s = get_settings()
+    tag = {"agent": agent} if agent else {}
+    if agent:
+        yield {"type": "agent_start", "agent": agent, "label": AGENTS[agent]["label"]}
+    tools = [t for t in turn.tools if allowed is None or t["name"] in allowed]
+    messages = list(messages)
+    accumulated, last_text = "", ""
+    exhausted = True
+    for _ in range(max_iter):
+        final, last_text = None, ""
+        turn.llm_calls += 1
+        async for kind, payload in llm.turn(system, tools, messages):
+            if kind == "text":
+                last_text += payload
+                accumulated += payload
+                if stream_text:
+                    turn.streamed += payload
+                    yield {"type": "token", "text": payload}
+            else:
+                final = payload
+        if final is None:
+            raise RuntimeError("LLM returned no final message")
+        messages.append({"role": "assistant", "content": final["content"]})
+        tool_uses = [b for b in final["content"] if b["type"] == "tool_use"]
+        if not tool_uses:
+            exhausted = False
+            break
+
+        results = []
+        for tu in tool_uses:
+            name, args = tu["name"], dict(tu["input"] or {})
+            yield {"type": "tool_start", "toolCallId": tu["id"], "name": name, "label": LABELS.get(name, name), **tag}
+            turn.tool_count += 1
+            if allowed is not None and name not in allowed:
+                res = {"error": {"code": "VALIDATION_FAILED", "message": "That tool is not available to you."}}
+            elif turn.tool_count > s.max_tools_per_turn:
+                res = {"error": {"code": "BUDGET_EXCEEDED", "message": "Tool limit for this turn reached. Answer with what you have."}}
+            elif name in EXTERNAL_TOOLS and _used_external(turn.conn, turn.conversation_id) >= s.max_external_calls_per_session:
+                res = {"error": {"code": "BUDGET_EXCEEDED", "message": "External lookup budget for this chat is used up."}}
+            else:
+                if name in EXTERNAL_TOOLS:
+                    _bump_external(turn.conn, turn.conversation_id)
+                if name in turn.with_trip:
+                    args["trip_id"] = turn.trip["id"]
+                try:
+                    res = await turn.hub.call(name, args)
+                except Exception:  # noqa: BLE001
+                    res = {"error": {"code": "EXTERNAL_UNAVAILABLE", "message": "Tool call failed."}}
+            ok = "error" not in res
+            if ok and name == "search_docs":
+                turn.conf_levels.append(res["confidence"])
+                for h in res["results"]:
+                    n = len(turn.refs) + 1
+                    turn.refs[n] = {"docId": h["document_id"], "chunkId": h["chunk_id"],
+                                    "label": f"{h['document_name']}, p.{h['page']}", "text": h["text"]}
+                    h["ref"] = f"[{n}]"
+                    for k in ("chunk_id", "document_id", "trip_id", "doc_type"):
+                        h.pop(k, None)
+            elif ok and name != "write_itinerary":
+                turn.evidence.append(json.dumps(res))
+            if ok and name == "write_itinerary":
+                turn.wrote_itinerary = True
+                yield {"type": "itinerary_updated", "itemId": res["item_id"], "action": res["action"], "undoId": res["undo_id"]}
+            yield {"type": "tool_result", "toolCallId": tu["id"], "ok": ok, "summary": summarize(name, args, res), **tag}
+            results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": json.dumps(res),
+                            **({"is_error": True} if not ok else {})})
+        messages.append({"role": "user", "content": results})
+
+    if exhausted:
+        note = "\n\n(I stopped because this took too many steps.)"
+        accumulated += note
+        last_text += note
+        if stream_text:
+            turn.streamed += note
+            yield {"type": "token", "text": note}
+    out["text"] = accumulated if stream_text else last_text
+    if agent:
+        yield {"type": "agent_end", "agent": agent}
+
+
+async def _merge(gens: list[AsyncIterator[dict]]) -> AsyncIterator[dict]:
+    """Interleave several event streams (specialists running in parallel). A failure in any raises here."""
+    q: asyncio.Queue = asyncio.Queue()
+    end = object()
+
+    async def pump(g):
+        try:
+            async for ev in g:
+                await q.put(ev)
+        except Exception as e:  # noqa: BLE001
+            await q.put(e)
+        finally:
+            await q.put(end)
+
+    tasks = [asyncio.create_task(pump(g)) for g in gens]
+    left = len(tasks)
+    try:
+        while left:
+            ev = await q.get()
+            if ev is end:
+                left -= 1
+            elif isinstance(ev, Exception):
+                raise ev
+            else:
+                yield ev
+    finally:
+        for t in tasks:
+            t.cancel()
+
+
+async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    out: dict = {}
+    msgs = [*history, {"role": "user", "content": user_message}]
+    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs), allowed=None,
+                              messages=msgs, stream_text=True, out=out):
+        yield ev
+
+
+async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    intents = route(user_message)
+    msgs = [*history, {"role": "user", "content": user_message}]
+    if len(intents) == 1:  # the specialist answers the user directly: no extra composer call
+        a = intents[0]
+        async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs),
+                                  allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={}):
+            yield ev
+        return
+    outs: dict[str, dict] = {a: {} for a in intents}
+    gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs), allowed=AGENTS[a]["tools"],
+                      messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS) for a in intents]
+    async for ev in _merge(gens):
+        yield ev
+    findings = "\n\n".join(f"[{AGENTS[a]['label']}]\n{outs[a].get('text', '').strip() or '(no answer)'}" for a in intents)
+    yield {"type": "agent_start", "agent": "composer", "label": "Composing the answer"}
+    turn.llm_calls += 1
+    final = None
+    async for kind, payload in llm.turn(composer_prompt(turn.trip, turn.prefs), [],
+                                        [{"role": "user", "content": f"Question: {user_message}\n\nSpecialist answers:\n\n{findings}"}]):
+        if kind == "text":
+            turn.streamed += payload
+            yield {"type": "token", "text": payload}
+        else:
+            final = payload
+    if final is None:
+        raise RuntimeError("LLM returned no final message")
+    yield {"type": "agent_end", "agent": "composer"}
+
+
+async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub, prefs: dict | None = None,
+                   mode: str | None = None) -> AsyncIterator[dict]:
+    s = get_settings()
+    mode = mode if mode in ("single", "multi") else s.agent_mode
     conn = connect()
     saved_assistant = False
-    full_text = ""
+    turn = None
     try:
         history = _load_conversation(conn, trip["id"], conversation_id)
         _save(conn, conversation_id, "user", user_message)
-        messages = [*history, {"role": "user", "content": user_message}]
         try:
             tools, with_trip = _model_tools(await hub.tools())
         except Exception:  # noqa: BLE001
             yield {"type": "error", "code": "AGENT_FAILED", "message": "The tool server is unavailable.", "retryable": True}
             return
-        system = system_prompt(trip, prefs=prefs)
-        refs: dict[int, dict] = {}
-        conf_levels: list[str] = []
-        wrote_itinerary = False
-        tool_count = 0
+        turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs)
+        answer = _answer_multi if mode == "multi" else _answer_single
+        async for ev in answer(turn, llm, history, user_message):
+            yield ev
+        full_text = turn.streamed
 
-        for _ in range(MAX_ITERATIONS):
-            final = None
-            async for kind, payload in llm.turn(system, tools, messages):
-                if kind == "text":
-                    full_text += payload
-                    yield {"type": "token", "text": payload}
-                else:
-                    final = payload
-            if final is None:
-                raise RuntimeError("LLM returned no final message")
-            messages.append({"role": "assistant", "content": final["content"]})
-            tool_uses = [b for b in final["content"] if b["type"] == "tool_use"]
-            if not tool_uses:
-                break
-
-            results = []
-            for tu in tool_uses:
-                name, args = tu["name"], dict(tu["input"] or {})
-                yield {"type": "tool_start", "toolCallId": tu["id"], "name": name, "label": LABELS.get(name, name)}
-                tool_count += 1
-                if tool_count > s.max_tools_per_turn:
-                    res = {"error": {"code": "BUDGET_EXCEEDED", "message": "Tool limit for this turn reached. Answer with what you have."}}
-                elif name in EXTERNAL_TOOLS and _used_external(conn, conversation_id) >= s.max_external_calls_per_session:
-                    res = {"error": {"code": "BUDGET_EXCEEDED", "message": "External lookup budget for this chat is used up."}}
-                else:
-                    if name in EXTERNAL_TOOLS:
-                        _bump_external(conn, conversation_id)
-                    if name in with_trip:
-                        args["trip_id"] = trip["id"]
-                    try:
-                        res = await hub.call(name, args)
-                    except Exception:  # noqa: BLE001
-                        res = {"error": {"code": "EXTERNAL_UNAVAILABLE", "message": "Tool call failed."}}
-                ok = "error" not in res
-                if ok and name == "search_docs":
-                    conf_levels.append(res["confidence"])
-                    for h in res["results"]:
-                        n = len(refs) + 1
-                        refs[n] = {"docId": h["document_id"], "chunkId": h["chunk_id"],
-                                   "label": f"{h['document_name']}, p.{h['page']}"}
-                        h["ref"] = f"[{n}]"
-                        for k in ("chunk_id", "document_id", "trip_id", "doc_type"):
-                            h.pop(k, None)
-                if ok and name == "write_itinerary":
-                    wrote_itinerary = True
-                    yield {"type": "itinerary_updated", "itemId": res["item_id"], "action": res["action"],
-                           "undoId": res["undo_id"]}
-                yield {"type": "tool_result", "toolCallId": tu["id"], "ok": ok, "summary": summarize(name, args, res)}
-                results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": json.dumps(res),
-                                **({"is_error": True} if not ok else {})})
-            messages.append({"role": "user", "content": results})
-        else:
-            full_text += "\n\n(I stopped because this took too many steps.)"
-            yield {"type": "token", "text": "\n\n(I stopped because this took too many steps.)"}
-
-        # citations: only markers the model actually used and that map to a real passage
+        # citations: only markers the model used that map to a real passage (and, in multi mode, are grounded)
         cited = []
         for m in re.findall(r"\[(\d+)\]", full_text):
-            if int(m) in refs and m not in cited:
+            if int(m) in turn.refs and m not in cited:
                 cited.append(m)
-        for m in cited:
-            yield {"type": "citation", "marker": f"[{m}]", **refs[int(m)]}
-        if conf_levels and not wrote_itinerary:  # actions skip the confidence check (spec 3.3)
-            level = max(conf_levels, key=RANK.get)
-            if level != "none" and not cited:
-                level = "low"  # CHAT-02: no citation means no "high"
+        supported = cited
+        if mode == "multi":
+            grounded = verify_citations(full_text, turn.refs, turn.evidence)
+            supported = [m for m in cited if grounded.get(m, False)]
+            if cited:
+                yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
+        for m in supported:
+            r = turn.refs[int(m)]
+            yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}
+        if turn.conf_levels and not turn.wrote_itinerary:  # actions skip the confidence check (spec 3.3)
+            level = max(turn.conf_levels, key=RANK.get)
+            if level != "none" and not supported:
+                level = "low"  # CHAT-02: no (grounded) citation means no "high"
             yield {"type": "confidence", "level": level}
         reason = verify_reason(user_message, full_text)
         if reason:
             yield {"type": "verify", "reason": reason}
         mid = _save(conn, conversation_id, "assistant", full_text)
         saved_assistant = True
-        yield {"type": "done", "messageId": mid}
+        yield {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
     except (LLMError, anthropic.APIError, ValueError, RuntimeError) as e:
         if isinstance(e, LLMError):
             err = {"code": "AGENT_FAILED", "message": e.message, "retryable": e.retryable}
@@ -172,9 +304,10 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             err = {"code": "AGENT_FAILED", "message": str(e)[:160], "retryable": False}
         yield {"type": "error", **err}
     finally:
-        if full_text and not saved_assistant:  # keep partial text on error / client stop (CHAT-06)
+        text = turn.streamed if turn else ""
+        if text and not saved_assistant:  # keep partial text on error / client stop (CHAT-06)
             try:
-                _save(conn, conversation_id, "assistant", full_text)
+                _save(conn, conversation_id, "assistant", text)
             except Exception:  # noqa: BLE001
                 pass
         conn.close()

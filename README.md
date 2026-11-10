@@ -13,6 +13,7 @@ make dev-backend    # http://localhost:8000/docs
 make web-install && make dev-web   # PWA at http://localhost:5173 (needs Node 22; proxies /api to :8000)
 make dev-backend-demo   # chat without any API key: deterministic stand-in model (not an AI), for demos/tests
 make test && make test-web
+.venv/bin/python scripts/compare_modes.py <trip_id>   # single vs multi-agent (use a demo backend, or --yes for real LLM)
 ```
 
 ## Status
