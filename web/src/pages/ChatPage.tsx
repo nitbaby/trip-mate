@@ -24,13 +24,28 @@ function Assistant({ m, onCite, onRetry, last }: { m: AssistantMessage; onCite: 
   const streaming = m.status === "streaming";
   return (
     <div className="max-w-[92%] space-y-2 self-start">
-      {m.tools.map((t) => <ToolCard key={t.id} tool={t} />)}
+      {m.agents.length === 0 && m.tools.map((t) => <ToolCard key={t.id} tool={t} />)}
+      {m.agents.map((a) => (
+        <section key={a.name} aria-label={a.label} className="space-y-1.5">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <span aria-hidden="true">{a.status === "running" ? "⏳" : "✓"}</span>{a.label}{a.status === "running" && "…"}
+          </p>
+          {m.tools.filter((t) => t.agent === a.name).map((t) => <ToolCard key={t.id} tool={t} />)}
+        </section>
+      ))}
       {(m.text || streaming) && (
         <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900">
           <Markdown text={m.text} citations={m.citations} onCite={onCite} />
           {streaming && <span className="tm-cursor" aria-hidden="true">▍</span>}
           {streaming && !m.text && <span className="text-sm text-slate-500">Thinking…</span>}
         </div>
+      )}
+      {m.verification && m.verification.checked > 0 && (
+        <p role="note" className={`text-xs ${m.verification.unsupported ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}>
+          {m.verification.unsupported
+            ? `⚠ ${m.verification.unsupported} of ${m.verification.checked} source(s) removed: the passage didn't support the statement.`
+            : `✓ ${m.verification.checked} source${m.verification.checked > 1 ? "s" : ""} checked against your documents.`}
+        </p>
       )}
       {m.itinerary.length > 0 && <p className="text-sm text-violet-700 dark:text-violet-300">✓ Itinerary updated by TripMate</p>}
       {needsBanner(m) && m.status === "done" && (

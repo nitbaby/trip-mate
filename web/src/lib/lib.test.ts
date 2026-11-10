@@ -43,6 +43,22 @@ describe("applyEvent", () => {
     expect(m.itinerary[0].undoId).toBe("u1");
     expect(needsBanner(m)).toBe(false);
   });
+  it("tracks agents, groups tools under them and records the citation check", () => {
+    const m = run([
+      { type: "agent_start", agent: "docs", label: "Documents agent" },
+      { type: "tool_start", toolCallId: "t1", name: "search_docs", label: "Searching", agent: "docs" },
+      { type: "tool_result", toolCallId: "t1", ok: true, summary: "2 passages", agent: "docs" },
+      { type: "agent_end", agent: "docs" },
+      { type: "agent_start", agent: "composer", label: "Composing the answer" },
+      { type: "verified", checked: 2, unsupported: 1 },
+    ]);
+    expect(m.agents).toEqual([
+      { name: "docs", label: "Documents agent", status: "done" },
+      { name: "composer", label: "Composing the answer", status: "running" },
+    ]);
+    expect(m.tools[0]).toMatchObject({ agent: "docs", status: "ok" });
+    expect(m.verification).toEqual({ checked: 2, unsupported: 1 });
+  });
   it("keeps partial text on error and flags low confidence", () => {
     const m = run([{ type: "token", text: "Partial" }, { type: "error", code: "AGENT_FAILED", message: "busy", retryable: true }]);
     expect(m).toMatchObject({ text: "Partial", status: "error", error: { retryable: true } });

@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/trips/{trip_id}", tags=["chat"])
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversationId: str | None = Field(default=None, min_length=1, max_length=64)
+    agentMode: str | None = Field(default=None, pattern="^(single|multi)$")  # per-request override (comparison/tests)
     preferences: dict[str, str] | None = None  # SET-02: units, currency, language
 
     @field_validator("preferences")
@@ -58,7 +59,7 @@ async def chat(trip_id: str, body: ChatIn, request: Request):
                                        "message": missing_key_message(get_settings())})}
             return
         async for ev in run_turn(trip=trip, conversation_id=cid, user_message=body.message, llm=llm,
-                                 hub=request.app.state.hub, prefs=body.preferences):
+                                 hub=request.app.state.hub, prefs=body.preferences, mode=body.agentMode):
             yield {"data": json.dumps(ev)}
 
     return EventSourceResponse(events(), headers={"X-Conversation-Id": cid})

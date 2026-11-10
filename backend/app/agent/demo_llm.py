@@ -38,6 +38,15 @@ def _time(q: str) -> str:
 
 class DemoLLM:
     async def turn(self, system: str, tools: list[dict], messages: list[dict]) -> AsyncIterator[tuple[str, object]]:
+        if "You are the COMPOSER" in system:  # merge specialist answers verbatim (keeps [n] markers)
+            body = messages[-1]["content"].split("Specialist answers:\n\n", 1)[-1]
+            sections = re.split(r"\n\n(?=\[[A-Z][^\]\n]*\]\n)", body)  # "[Documents agent]\n<answer>" blocks
+            text = "\n\n".join(re.sub(r"^\[[^\]\n]*\]\n", "", sec).strip() for sec in sections)
+            for w in re.findall(r"\S+\s*", text):
+                yield "text", w
+            yield "final", {"content": [{"type": "text", "text": text}], "stop_reason": "end_turn"}
+            return
+        have = {t["name"] for t in tools}
         q = next(m["content"] for m in reversed(messages) if m["role"] == "user" and isinstance(m["content"], str)).lower()
         results = _tool_results(messages)
         text, calls = "", []
@@ -46,22 +55,24 @@ class DemoLLM:
         today = date.fromisoformat(_field(system, r"it is \w+ (\d{4}-\d{2}-\d{2})", trip_start))
 
         if not results:
-            if re.search(r"\b(add|book|schedule)\b.*\b(reservation|dinner|lunch|meeting)\b", q):
+            if re.search(r"\b(add|book|schedule)\b.*\b(reservation|dinner|lunch|meeting)\b", q) and "write_itinerary" in have:
                 when = today + timedelta(days=1 if "tomorrow" in q else 0)
                 kind = "Lunch" if "lunch" in q else "Dinner"
                 calls = [("write_itinerary", {"action": "create", "type": "reservation", "title": f"{kind} reservation",
                                               "start_at": f"{when}T{_time(q)}"})]
-            elif re.search(r"vegetarian|restaurant|food|eat|place", q):
+            elif re.search(r"\b(vegetarian|restaurant|food|eat|place|places)\b", q) and "search_places" in have:
                 calls = [("search_places", {"location": "Shinjuku Granbell Hotel" if "hotel" in q else dest, "vegetarian": "vegetarian" in q, "open_now": "open now" in q})]
-            elif "weather" in q or "forecast" in q:
+            elif ("weather" in q or "forecast" in q) and "get_weather" in have:
                 calls = [("get_weather", {"location": dest, "days": 3})]
-            elif re.search(r"itinerary|plan today|today's plan", q):
+            elif re.search(r"itinerary|plan today|today's plan", q) and "read_itinerary" in have:
                 calls = [("read_itinerary", {})]
+            elif "search_docs" in have:
+                calls = [("search_docs", {"query": re.sub(r"\b(weather|forecast|temperature|rain)\b", "", q).strip() or q})]
             else:
-                calls = [("search_docs", {"query": q})]
+                text = "I can't help with that part."
         else:
             name, r = results[-1]
-            if name == "search_docs" and re.search(r"flight|delay|depart", q) and len(results) == 1:
+            if name == "search_docs" and re.search(r"flight|delay|depart", q) and len(results) == 1 and "get_flight_status" in have:
                 blob = " ".join(h["text"] for h in r.get("results", []))
                 flights = re.findall(r"Flight:\s*([A-Z]{2}\s?\d+)\s*Departs:[^\n]*?(\d{1,2}:\d{2}\s*[AP]M)", blob)
                 want = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)", q)  # pick the flight departing at the time asked

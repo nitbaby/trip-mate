@@ -9,6 +9,7 @@ os.environ["EMBEDDINGS"] = "hash"
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIPMATE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("EMBEDDINGS", "hash")
+    monkeypatch.setenv("AGENT_MODE", "single")  # the original suite covers single mode; multi has its own tests
     monkeypatch.setenv("LIVE_MODE", "mock")  # never hit the network from tests, whatever .env says
     from app import config
 

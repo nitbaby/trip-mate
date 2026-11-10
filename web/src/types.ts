@@ -25,20 +25,25 @@ export interface StoredMessage { id: string; role: "user" | "assistant"; content
 // Spec 5.2 (itinerary_updated also carries undoId)
 export type ChatEvent =
   | { type: "token"; text: string }
-  | { type: "tool_start"; toolCallId: string; name: string; label: string }
-  | { type: "tool_result"; toolCallId: string; ok: boolean; summary: string }
+  | { type: "agent_start"; agent: string; label: string }
+  | { type: "agent_end"; agent: string }
+  | { type: "tool_start"; toolCallId: string; name: string; label: string; agent?: string }
+  | { type: "tool_result"; toolCallId: string; ok: boolean; summary: string; agent?: string }
+  | { type: "verified"; checked: number; unsupported: number }
   | { type: "citation"; marker: string; docId: string; chunkId: string; label: string }
   | { type: "confidence"; level: "high" | "low" | "none" }
   | { type: "verify"; reason: string }
   | { type: "itinerary_updated"; itemId: string; action: "created" | "updated" | "deleted"; undoId?: string }
   | { type: "error"; code: string; message: string; retryable: boolean }
-  | { type: "done"; messageId: string };
+  | { type: "done"; messageId: string; agentMode?: "single" | "multi"; llmCalls?: number; toolCalls?: number };
 
-export interface ToolCall { id: string; name: string; label: string; status: "running" | "ok" | "failed"; summary?: string }
+export interface ToolCall { id: string; name: string; label: string; status: "running" | "ok" | "failed"; summary?: string; agent?: string }
+export interface AgentRun { name: string; label: string; status: "running" | "done" }
 export interface Citation { marker: string; docId: string; chunkId: string; label: string }
 export interface UserMessage { id: string; role: "user"; text: string }
 export interface AssistantMessage {
-  id: string; role: "assistant"; text: string; tools: ToolCall[]; citations: Record<string, Citation>;
+  id: string; role: "assistant"; text: string; tools: ToolCall[]; agents: AgentRun[]; citations: Record<string, Citation>;
+  verification?: { checked: number; unsupported: number };
   confidence?: "high" | "low" | "none"; verify?: string;
   itinerary: { itemId: string; action: string; undoId?: string }[];
   error?: { message: string; retryable: boolean };
