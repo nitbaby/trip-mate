@@ -9,6 +9,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=REPO_ROOT / ".env", extra="ignore")
 
+    # LLM provider: gemini (default) | openai (any OpenAI-compatible API, e.g. Groq) | anthropic
+    llm_provider: str = "gemini"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    llm_api_key: str = ""      # for llm_provider=openai
+    llm_model: str = ""
+    llm_base_url: str = ""
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     live_mode: str = "mock"  # mock | real

@@ -7,7 +7,8 @@ Mobile-first travel assistant (PWA + FastAPI + RAG + MCP tools). See `docs/` for
 
 ## Quickstart
 ```
-make setup          # venv + deps, creates .env (add ANTHROPIC_API_KEY)
+make setup          # venv + deps, creates .env (add GEMINI_API_KEY; free key at aistudio.google.com/apikey)
+.venv/bin/python scripts/llm_check.py --models   # verify key + model
 make dev-backend    # http://localhost:8000/docs
 make test
 ```

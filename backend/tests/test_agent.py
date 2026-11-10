@@ -180,12 +180,13 @@ def test_retryable_error_keeps_partial_text(client, trip):
 def test_missing_api_key_and_unknown_trip(client, trip, monkeypatch):
     from app import config
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     config.get_settings.cache_clear()
     client.app.state.llm = None
     with client.stream("POST", f"/api/trips/{trip}/chat", json={"message": "hi"}) as r:
         body = "".join(r.iter_lines())
-    assert "ANTHROPIC_API_KEY is not set" in body
+    assert "GEMINI_API_KEY is not set" in body
     r = client.post("/api/trips/nope/chat", json={"message": "hi"})
     assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
     assert client.post(f"/api/trips/{trip}/chat", json={"message": ""}).status_code == 422

@@ -9,6 +9,7 @@ import anthropic
 from ..config import get_settings
 from ..db import connect, new_id, now_iso
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
+from .llm import LLMError
 from .prompt import system_prompt
 
 MAX_ITERATIONS = 8
@@ -159,9 +160,13 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         mid = _save(conn, conversation_id, "assistant", full_text)
         saved_assistant = True
         yield {"type": "done", "messageId": mid}
-    except (anthropic.APIError, ValueError, RuntimeError) as e:
-        err = _anthropic_error(e) if isinstance(e, anthropic.APIError) else \
-            {"code": "AGENT_FAILED", "message": str(e)[:160], "retryable": False}
+    except (LLMError, anthropic.APIError, ValueError, RuntimeError) as e:
+        if isinstance(e, LLMError):
+            err = {"code": "AGENT_FAILED", "message": e.message, "retryable": e.retryable}
+        elif isinstance(e, anthropic.APIError):
+            err = _anthropic_error(e)
+        else:
+            err = {"code": "AGENT_FAILED", "message": str(e)[:160], "retryable": False}
         yield {"type": "error", **err}
     finally:
         if full_text and not saved_assistant:  # keep partial text on error / client stop (CHAT-06)

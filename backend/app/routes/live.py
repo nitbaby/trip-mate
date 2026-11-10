@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from ..agent.llm import build_llm
 from ..config import get_settings
 from ..db import connect
 from ..errors import not_found
@@ -25,7 +26,7 @@ def status(trip_id: str):
     mode = s.live_mode
     srcs = {"flight": "mock (no real provider configured)", "weather": "Open-Meteo", "places": "OpenStreetMap Nominatim",
             "fx": "Frankfurter"}
-    return {"live_mode": mode, "anthropic_configured": bool(s.anthropic_api_key),
+    return {"live_mode": mode, "llm_provider": s.llm_provider, "llm_configured": build_llm(s) is not None,
             "integrations": [{"name": k, "provider": srcs[k] if mode == "real" and k != "flight" else "mock",
                               "mode": "mock" if (mode == "mock" or k == "flight") else "real",
                               "last_contacted": last[k]} for k in srcs]}

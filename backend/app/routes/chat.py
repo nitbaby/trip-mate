@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from ..agent.llm import AnthropicLLM
+from ..agent.llm import build_llm, missing_key_message
 from ..agent.loop import new_conversation_id, run_turn
 from ..config import get_settings
 from ..db import connect, row_to_dict
@@ -22,8 +22,7 @@ def _llm(request: Request):
     llm = getattr(request.app.state, "llm", None)
     if llm:
         return llm
-    s = get_settings()
-    return AnthropicLLM(s.anthropic_api_key, s.anthropic_model) if s.anthropic_api_key else None
+    return build_llm(get_settings())
 
 
 @router.post("/chat")
@@ -39,7 +38,7 @@ async def chat(trip_id: str, body: ChatIn, request: Request):
     async def events():
         if llm is None:
             yield {"data": json.dumps({"type": "error", "code": "AGENT_FAILED", "retryable": False,
-                                       "message": "ANTHROPIC_API_KEY is not set. Add it to .env and restart."})}
+                                       "message": missing_key_message(get_settings())})}
             return
         async for ev in run_turn(trip=trip, conversation_id=cid, user_message=body.message, llm=llm,
                                  hub=request.app.state.hub):

@@ -28,4 +28,7 @@ for r in (trips.router, documents.router, itinerary.router, live.router, chat.ro
 @app.get("/api/health")
 def health():
     s = get_settings()
-    return {"ok": True, "live_mode": s.live_mode, "anthropic_configured": bool(s.anthropic_api_key)}
+    from .agent.llm import build_llm
+
+    return {"ok": True, "live_mode": s.live_mode, "llm_provider": s.llm_provider,
+            "llm_configured": build_llm(s) is not None}
