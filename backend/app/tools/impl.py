@@ -8,6 +8,9 @@ from . import flights, fx, places, weather
 
 
 def search_docs(trip_id: str, query: str, doc_type: str | None = None, k: int = 5) -> dict:
+    with connect() as c:
+        if not c.execute("SELECT 1 FROM trips WHERE id=?", (trip_id,)).fetchone():
+            raise not_found("Trip")  # an unknown trip must not look like "no matching documents"
     hits = vectors.query(trip_id, query, k=max(1, min(k, 10)), doc_type=doc_type)
     with connect() as c:
         for h in hits:

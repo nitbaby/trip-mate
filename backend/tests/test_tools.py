@@ -87,3 +87,11 @@ def test_agent_write_conflict_and_validation(client, tid):
         impl.write_itinerary(tid, "create", type="bogus", title="x", start_at="2026-12-02T20:00:00")
     with pytest.raises(Exception):
         impl.write_itinerary(tid, "update", title="no id")
+
+
+def test_search_docs_unknown_trip_is_an_error(client):
+    from app.errors import ApiError
+
+    with pytest.raises(ApiError) as e:
+        impl.search_docs("missing", "check-out")
+    assert e.value.code == "NOT_FOUND"
