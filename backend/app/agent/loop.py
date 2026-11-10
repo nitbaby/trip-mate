@@ -25,6 +25,10 @@ from .verify import verify_citations
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
 HISTORY_LIMIT = 20
+# an answer that says the itinerary was changed, checked against whether a write really succeeded
+CHANGE_CLAIM = re.compile(r"\b(?:I(?:'ve|'ve| have)?\s+(?:added|scheduled|booked|removed|deleted|moved|updated|created)|"
+                          r"(?:has|have) been (?:added|scheduled|booked|removed|deleted|moved|updated)|"
+                          r"(?:added|scheduled|booked) (?:a |an |the )?\w*[^.\n]{0,40}(?:to|on|in) your (?:itinerary|schedule))", re.IGNORECASE)
 RANK = {"none": 0, "low": 1, "high": 2}
 
 
@@ -299,8 +303,11 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         answer = _answer_multi if mode == "multi" else _answer_single
         async for ev in answer(turn, llm, history, user_message):
             yield ev
-        if turn.failed_write and not turn.wrote_itinerary:
-            note = "\n\n⚠️ The itinerary was NOT changed: the update failed. Please try again with the day, time and a title."
+        claims_change = bool(CHANGE_CLAIM.search(turn.streamed))
+        if not turn.wrote_itinerary and (turn.failed_write or claims_change):
+            note = ("\n\n⚠️ The itinerary was NOT changed: the update failed. Please try again with the day, time and a title."
+                    if turn.failed_write else
+                    "\n\n⚠️ The itinerary was NOT changed: no update was made. Please try again.")
             turn.streamed += note
             yield {"type": "token", "text": note}
         full_text = turn.streamed

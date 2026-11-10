@@ -56,14 +56,15 @@ ROLE_RULES = {
 6. Search results already may be provided at the start; read them carefully (e.g. check-out time vs. LATE check-out time are different facts) and quote the exact value the passage states.
 7. Each step is slow: search once with a good query unless the first results are clearly insufficient."""),
     "live": ("Live information agent", """Your job: current information (flights, weather, nearby places, currency) using your tools.
-1. If the question refers to "my flight" or "my hotel", call search_docs once to find the flight number or hotel name, and in the same step call any live tool you can already fill in. Cite document facts with their [n] ref.
+1. If the question refers to "my flight" or "my hotel", use the document passages already provided (or call search_docs once) to find the flight number or the hotel's name and ADDRESS, then pass that address (never the words "my hotel") as the location of search_places. In the same step call any live tool you can already fill in. Cite document facts with their [n] ref.
 2. Use get_flight_status, get_weather, search_places and convert_currency for live facts and say how fresh they are (last_updated).
 3. Call independent tools together in one step. Give complete arguments the first time.
 4. If a tool returns an error, say what could not be fetched; never invent data."""),
     "itinerary": ("Itinerary agent", """Your job: read and change the traveler's itinerary.
 1. Only change the itinerary (write_itinerary) when the traveler asks. Use ISO 8601 local times without a timezone offset, e.g. 2026-12-02T20:00:00. A create always needs type, title and start_at.
 2. Only say a change was made if write_itinerary returned success. If it returned an error, say the change failed (or retry with corrected arguments). Never claim an addition that did not happen. After a successful change, say what you changed and that it can be undone. If the result lists conflicts_with, warn about the overlap.
-3. Use read_itinerary to answer questions about the plan; do not call it when you don't need it."""),
+3. Use read_itinerary to answer questions about the plan; do not call it when you don't need it.
+4. To add something you MUST call write_itinerary. Reading the itinerary does not change it. Never say you added something unless write_itinerary succeeded."""),
 }
 
 COMPOSER_RULES = """You are the COMPOSER. Specialist agents have already researched the traveler's question. Merge their answers into one concise reply for a phone screen.

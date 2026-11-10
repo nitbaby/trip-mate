@@ -232,3 +232,17 @@ def test_failed_itinerary_write_is_never_reported_as_done(client, trip):
     assert client.get(f"/api/trips/{trip}/itinerary").json() == []
     # the model is told the change did not happen
     assert "NOT changed" in json.dumps(llm.calls[1]["messages"])
+
+
+def test_claiming_a_change_without_any_write_gets_a_warning(client, trip):
+    llm = ScriptedLLM([{"tools": [("read_itinerary", {})]}, {"text": "I've added dinner at 8 PM to your itinerary."}])
+    ev = chat(client, trip, "Add dinner at 8 PM tomorrow to my itinerary", llm)
+    assert "NOT changed" in "".join(e["text"] for e in ev if e["type"] == "token")
+
+
+def test_a_real_write_has_no_warning(client, trip):
+    llm = ScriptedLLM([{"tools": [("write_itinerary", {"action": "create", "type": "reservation", "title": "Dinner",
+                                                      "start_at": "2026-12-02T20:00:00"})]},
+                       {"text": "I've added dinner at 8 PM to your itinerary."}])
+    ev = chat(client, trip, "Add dinner at 8 PM tomorrow to my itinerary", llm)
+    assert "NOT changed" not in "".join(e["text"] for e in ev if e["type"] == "token")

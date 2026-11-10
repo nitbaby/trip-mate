@@ -114,3 +114,12 @@ def test_places_generic_query_words_do_not_filter(tid):
                              now=datetime.fromisoformat("2026-12-01T20:00:00"))
     assert len(r["results"]) >= 2
     assert places.search_places("shinjuku", "falafel", now=datetime.fromisoformat("2026-12-01T20:00:00"))["results"][0]["name"].startswith("Falafel")
+
+
+def test_sibling_chunks_of_the_best_document_are_kept_below_the_threshold():
+    from app.confidence import assess
+    hits = [{"score": 0.69, "document_id": "a"}, {"score": 0.32, "document_id": "b"},
+            {"score": 0.24, "document_id": "a"}, {"score": 0.20, "document_id": "c"}, {"score": 0.12, "document_id": "a"}]
+    level, usable = assess(hits)
+    assert level == "high" and [h["score"] for h in usable] == [0.69, 0.32, 0.24]
+    assert assess([{"score": 0.2, "document_id": "a"}, {"score": 0.19, "document_id": "a"}]) == ("none", [])

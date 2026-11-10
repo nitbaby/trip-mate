@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6
     conf_high: float = 0.45
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
+    conf_sibling_margin: float = 0.10  # same-document chunks this far below conf_low are still returned
     conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
     agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
     # Rate limits for the LLM API. -1 = provider default (gemini: 12 requests/min [free tier allows 15], 500/day); 0 = unlimited.
