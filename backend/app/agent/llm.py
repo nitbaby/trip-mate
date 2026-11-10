@@ -50,7 +50,9 @@ def sanitize_schema(node):
         if len(options) == 1:
             return sanitize_schema({**options[0], **rest})
         node = {**rest, "anyOf": options}
-    return {k: sanitize_schema(v) for k, v in node.items()}
+    # "properties" maps parameter names to schemas: a parameter called "title" must survive
+    return {k: ({n: sanitize_schema(sub) for n, sub in v.items()} if k == "properties" and isinstance(v, dict)
+                else sanitize_schema(v)) for k, v in node.items()}
 
 
 def to_openai_tools(tools: list[dict]) -> list[dict]:
@@ -151,7 +153,8 @@ class OpenAICompatLLM:
             return 1.0 if attempt == 0 else None
         return None
 
-    async def turn(self, system: str, tools: list[dict], messages: list[dict]) -> AsyncIterator[tuple[str, object]]:
+    async def turn(self, system: str, tools: list[dict], messages: list[dict],
+                   force_tool: str | None = None) -> AsyncIterator[tuple[str, object]]:
         """Yields ("wait", {"seconds", "reason"}) while queued or backing off, then ("text", ...) chunks, then ("final", ...)."""
         lim = self.limits
         attempt = 0
@@ -175,7 +178,8 @@ class OpenAICompatLLM:
                 stream = await self.client.chat.completions.create(
                     model=self.model, max_tokens=self.max_tokens, temperature=0.2, stream=True,
                     messages=to_openai_messages(system, messages), tools=to_openai_tools(tools) or openai.NOT_GIVEN,
-                    reasoning_effort=self.reasoning_effort or openai.NOT_GIVEN)
+                    reasoning_effort=self.reasoning_effort or openai.NOT_GIVEN,
+                    tool_choice="required" if force_tool else openai.NOT_GIVEN)
                 async for chunk in stream:
                     if not chunk.choices:
                         continue
@@ -224,10 +228,12 @@ class AnthropicLLM:
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model, self.max_tokens = model, max_tokens
 
-    async def turn(self, system: str, tools: list[dict], messages: list[dict]) -> AsyncIterator[tuple[str, object]]:
+    async def turn(self, system: str, tools: list[dict], messages: list[dict],
+                   force_tool: str | None = None) -> AsyncIterator[tuple[str, object]]:
+        extra = {"tool_choice": {"type": "tool", "name": force_tool}} if force_tool else {}
         try:
             async with self.client.messages.stream(model=self.model, max_tokens=self.max_tokens, system=system,
-                                                   tools=tools, messages=messages) as stream:
+                                                   tools=tools, messages=messages, **extra) as stream:
                 async for text in stream.text_stream:
                     yield "text", text
                 final = await stream.get_final_message()

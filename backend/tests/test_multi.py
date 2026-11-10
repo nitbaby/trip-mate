@@ -147,6 +147,7 @@ def test_itinerary_agent_writes_with_undo(client, trip):
                        {"text": "Added dinner. You can undo it."}])
     ev = chat(client, trip, "Add a dinner reservation at 8 PM tomorrow", llm)
     assert ev[0]["agent"] == "itinerary"
+    assert llm.calls[0]["force_tool"] == "write_itinerary" and llm.calls[1]["force_tool"] is None  # forced on step 1 only
     up = next(e for e in ev if e["type"] == "itinerary_updated")
     assert client.post(f"/api/trips/{trip}/undo/{up['undoId']}").status_code == 200
     assert "confidence" not in types(ev)
@@ -246,3 +247,12 @@ def test_a_real_write_has_no_warning(client, trip):
                        {"text": "I've added dinner at 8 PM to your itinerary."}])
     ev = chat(client, trip, "Add dinner at 8 PM tomorrow to my itinerary", llm)
     assert "NOT changed" not in "".join(e["text"] for e in ev if e["type"] == "token")
+
+
+@pytest.mark.parametrize("msg,forced", [("Add dinner at 8 PM tomorrow to my itinerary", True), ("please schedule a tour on Dec 3", True),
+                                        ("What is on my itinerary tomorrow?", False), ("Cancel my dinner", False),
+                                        ("Is the hotel breakfast included?", False)])
+def test_only_explicit_add_requests_force_the_write_tool(msg, forced):
+    from app.agent.loop import _force
+    assert (_force("itinerary", msg) == "write_itinerary") is forced
+    assert _force("docs", msg) is None

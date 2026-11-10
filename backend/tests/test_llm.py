@@ -67,7 +67,9 @@ def test_real_mcp_tool_schemas_are_gemini_safe():
 
     tools = to_openai_tools(asyncio.run(go()))
     blob = json.dumps(tools)
-    assert "anyOf" not in blob and '"title"' not in blob and '"default"' not in blob
+    assert "anyOf" not in blob and '"title": "' not in blob and '"default"' not in blob  # (a *parameter* named title is fine)
+    write = next(t for t in tools if t["function"]["name"] == "write_itinerary")
+    assert "title" in write["function"]["parameters"]["properties"]
     assert {t["function"]["name"] for t in tools} >= {"search_docs", "write_itinerary"}
 
 
@@ -178,3 +180,10 @@ def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
     # tools sent to Gemini carry no trip_id and no unsupported schema keywords
     sent = json.dumps(requests[0]["tools"])
     assert "trip_id" not in sent and "anyOf" not in sent
+
+
+def test_sanitize_keeps_a_parameter_named_title():
+    from app.agent.llm import sanitize_schema
+    out = sanitize_schema({"title": "Args", "type": "object", "required": ["title"],
+                           "properties": {"title": {"title": "Title", "anyOf": [{"type": "string"}, {"type": "null"}], "default": None}}})
+    assert out == {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}

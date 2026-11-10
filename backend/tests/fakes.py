@@ -10,8 +10,8 @@ class ScriptedLLM:
     def __init__(self, turns):
         self.turns, self.calls = list(turns), []
 
-    async def turn(self, system, tools, messages):
-        self.calls.append({"system": system, "tools": tools, "messages": [dict(m) for m in messages]})
+    async def turn(self, system, tools, messages, force_tool=None):
+        self.calls.append({"system": system, "tools": tools, "messages": [dict(m) for m in messages], "force_tool": force_tool})
         t = self.turns.pop(0)
         if callable(t):
             t = t(system, tools, messages)

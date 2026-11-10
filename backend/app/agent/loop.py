@@ -111,7 +111,7 @@ async def _none():
 
 async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed: set[str] | None, messages: list[dict],
                     stream_text: bool, out: dict, max_iter: int = MAX_ITERATIONS,
-                    prefetch_docs: str | None = None) -> AsyncIterator[dict]:
+                    prefetch_docs: str | None = None, force_first_tool: str | None = None) -> AsyncIterator[dict]:
     """Run one agent to completion. Yields events; the agent's answer is left in out["text"]."""
     s = get_settings()
     tag = {"agent": agent} if agent else {}
@@ -129,7 +129,10 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
                                   "input": {"query": prefetch_docs}}], "stop_reason": "tool_use"}
         else:
             turn.llm_calls += 1
-        async for kind, payload in (_none() if final else llm.turn(system, tools, messages)):
+        forced = {"force_tool": force_first_tool} if it == 0 and force_first_tool and any(t["name"] == force_first_tool for t in tools) else {}
+        # the forced step offers only that tool: servers differ in how strictly they honour a named tool_choice
+        call_tools = [_strict_create(t) for t in tools if t["name"] == force_first_tool] if forced else tools
+        async for kind, payload in (_none() if final else llm.turn(system, call_tools, messages, **forced)):
             if kind == "wait":  # the adapter is queued for the rate limit or backing off: tell the UI
                 yield {"type": "waiting", **payload, **tag}
             elif kind == "text":
@@ -239,8 +242,35 @@ async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str
     out: dict = {}
     msgs = [*history, {"role": "user", "content": user_message}]
     async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs), allowed=None,
-                              messages=msgs, stream_text=True, out=out):
+                              messages=msgs, stream_text=True, out=out, force_first_tool=_force(None, user_message)):
         yield ev
+
+
+ADD_REQUEST = re.compile(r"^\W*(?:please |can you |could you )?(?:add|schedule|book|create|put)\b|"
+                         r"\b(?:add|schedule|put)\b.{0,60}\b(?:to|on|in) (?:my |the )?(?:itinerary|schedule|plan)\b", re.IGNORECASE)
+
+
+def _strict_create(tool: dict) -> dict:
+    """The forced step is always an 'add': make the create fields required in the schema the model sees, because
+    small models treat the optional-looking title as skippable and put the name in notes."""
+    schema = json.loads(json.dumps(tool["input_schema"]))
+    schema["required"] = ["action", "type", "title", "start_at"]
+    props = schema.get("properties", {})
+    if "action" in props:
+        props["action"] = {"type": "string", "enum": ["create"]}
+    if "title" in props:
+        props["title"] = {"type": "string", "description": 'Short name of the item, e.g. "Dinner"'}
+    if "type" in props:
+        props["type"] = {"type": "string", "enum": ["flight", "hotel", "reservation", "activity", "transit", "note"]}
+    if "start_at" in props:
+        props["start_at"] = {"type": "string", "description": "ISO 8601 local time, e.g. 2026-12-02T20:00:00"}
+    return {**tool, "input_schema": schema}
+
+
+def _force(agent: str | None, message: str) -> str | None:
+    """Small models sometimes say they added something without calling the tool: an explicit 'add ...' request
+    forces the first step to be write_itinerary (the model still fills in the arguments)."""
+    return "write_itinerary" if agent in (None, "itinerary") and ADD_REQUEST.search(message) else None
 
 
 def _prefetch(agent: str, message: str) -> str | None:
@@ -257,13 +287,13 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
         a = intents[0]
         async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs),
                                   allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={},
-                                  prefetch_docs=_prefetch(a, user_message)):
+                                  prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)):
             yield ev
         return
     outs: dict[str, dict] = {a: {} for a in intents}
     gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs), allowed=AGENTS[a]["tools"],
                       messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS,
-                      prefetch_docs=_prefetch(a, user_message)) for a in intents]
+                      prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)) for a in intents]
     async for ev in _merge(gens):
         yield ev
     findings = "\n\n".join(f"[{AGENTS[a]['label']}]\n{outs[a].get('text', '').strip() or '(no answer)'}" for a in intents)
