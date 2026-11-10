@@ -69,7 +69,8 @@ def _bump_external(conn, cid):
     conn.commit()
 
 
-async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub) -> AsyncIterator[dict]:
+async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub,
+                   prefs: dict | None = None) -> AsyncIterator[dict]:
     s = get_settings()
     conn = connect()
     saved_assistant = False
@@ -83,7 +84,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         except Exception:  # noqa: BLE001
             yield {"type": "error", "code": "AGENT_FAILED", "message": "The tool server is unavailable.", "retryable": True}
             return
-        system = system_prompt(trip)
+        system = system_prompt(trip, prefs=prefs)
         refs: dict[int, dict] = {}
         conf_levels: list[str] = []
         wrote_itinerary = False

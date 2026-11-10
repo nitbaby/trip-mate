@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+html, body, #root { height: 100%; }
+body { margin: 0; font-size: 16px; /* A11Y-01: inputs >= 16px also avoids iOS zoom */ }
+input, select, textarea, button { font: inherit; }
+
+/* A11Y-04 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+@keyframes tm-blink { 50% { opacity: 0; } }
+.tm-cursor { display: inline-block; width: 0.5ch; animation: tm-blink 1s steps(1) infinite; }
+@keyframes tm-shrink { from { width: 100%; } to { width: 0; } }
+@keyframes tm-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.tm-sheet { animation: tm-up 0.2s ease-out; }

@@ -1,7 +1,8 @@
 import json
+import re
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.llm import build_llm, missing_key_message
@@ -16,6 +17,22 @@ router = APIRouter(prefix="/api/trips/{trip_id}", tags=["chat"])
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversationId: str | None = Field(default=None, min_length=1, max_length=64)
+    preferences: dict[str, str] | None = None  # SET-02: units, currency, language
+
+    @field_validator("preferences")
+    @classmethod
+    def _clean_prefs(cls, v):
+        """Only known keys with tightly validated values reach the system prompt."""
+        if not v:
+            return None
+        out = {}
+        if v.get("units") in ("metric", "imperial"):
+            out["units"] = v["units"]
+        if re.fullmatch(r"[A-Z]{3}", v.get("currency", "")):
+            out["currency"] = v["currency"]
+        if re.fullmatch(r"[\w ()\-]{1,30}", v.get("language", "")):
+            out["language"] = v["language"]
+        return out or None
 
 
 def _llm(request: Request):
@@ -41,7 +58,7 @@ async def chat(trip_id: str, body: ChatIn, request: Request):
                                        "message": missing_key_message(get_settings())})}
             return
         async for ev in run_turn(trip=trip, conversation_id=cid, user_message=body.message, llm=llm,
-                                 hub=request.app.state.hub):
+                                 hub=request.app.state.hub, prefs=body.preferences):
             yield {"data": json.dumps(ev)}
 
     return EventSourceResponse(events(), headers={"X-Conversation-Id": cid})

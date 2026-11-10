@@ -2,7 +2,20 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
-def system_prompt(trip: dict, now: datetime | None = None) -> str:
+def prefs_line(prefs: dict | None) -> str:
+    if not prefs:
+        return ""
+    bits = []
+    if prefs.get("units") in ("metric", "imperial"):
+        bits.append(f"use {prefs['units']} units")
+    if prefs.get("currency"):
+        bits.append(f"when converting or quoting money, prefer {prefs['currency']}")
+    if prefs.get("language"):
+        bits.append(f"write answers in {prefs['language']}")
+    return ("\nTraveler preferences: " + "; ".join(bits) + ".") if bits else ""
+
+
+def system_prompt(trip: dict, now: datetime | None = None, prefs: dict | None = None) -> str:
     tz = trip["timezone"]
     try:
         now = now or datetime.now(ZoneInfo(tz))
@@ -11,7 +24,7 @@ def system_prompt(trip: dict, now: datetime | None = None) -> str:
     return f"""You are TripMate, a travel assistant for one traveler during their trip. Be concise: answers are read on a phone.
 
 Trip: {trip['name']}. Destinations: {', '.join(trip['destinations'])}. Dates: {trip['start_date']} to {trip['end_date']}.
-Trip timezone: {tz}. Right now it is {now.strftime('%A %Y-%m-%d %H:%M')} in that timezone. Resolve "today", "tomorrow" and times from this.
+Trip timezone: {tz}. Right now it is {now.strftime('%A %Y-%m-%d %H:%M')} in that timezone. Resolve "today", "tomorrow" and times from this.{prefs_line(prefs)}
 
 How to work:
 1. For any question about the traveler's own bookings, rules, plans or documents, call search_docs first. Never answer such questions from memory.

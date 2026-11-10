@@ -5,7 +5,7 @@ from .mask import find_sensitive
 FACT_PATTERNS = [
     ("Check-in", r"check-?in(?: time)?\s*[:\-]?\s*(?:from\s*)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2})"),
     ("Check-out", r"check-?out(?: time)?\s*[:\-]?\s*(?:by|before\s*)?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}:\d{2})"),
-    ("Breakfast", r"(breakfast[^.\n]{0,60})"),
+    ("Breakfast", r"(breakfast[^.\n]{0,140})"),
     ("Hotel", r"^\s*(?:hotel|property)\s*:\s*([^\n]{3,60})"),
     ("Flight", r"\b(?:flight)\s*[:#]?\s*([A-Z]{2}\s?\d{2,4})\b"),
 ]

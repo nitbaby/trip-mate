@@ -173,6 +173,8 @@ class AnthropicLLM:
 # ---------- factory ----------
 
 def missing_key_message(s: Settings) -> str:
+    if s.llm_provider == "demo":
+        return ""
     name = {"gemini": "GEMINI_API_KEY", "openai": "LLM_API_KEY (and LLM_MODEL, LLM_BASE_URL)",
             "anthropic": "ANTHROPIC_API_KEY"}.get(s.llm_provider, "LLM_PROVIDER (gemini, openai or anthropic)")
     return f"{name} is not set. Add it to .env and restart."
@@ -180,6 +182,10 @@ def missing_key_message(s: Settings) -> str:
 
 def build_llm(s: Settings):
     """Return the configured LLM adapter, or None when it is not configured."""
+    if s.llm_provider == "demo":  # deterministic stand-in for tests/demos (see demo_llm.py)
+        from .demo_llm import DemoLLM
+
+        return DemoLLM()
     if s.llm_provider == "gemini" and s.gemini_api_key:
         return OpenAICompatLLM(s.gemini_api_key, s.gemini_model, s.gemini_base_url, provider_name="Gemini",
                                reasoning_effort=s.gemini_reasoning_effort or None)
