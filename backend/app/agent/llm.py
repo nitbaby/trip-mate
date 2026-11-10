@@ -73,9 +73,13 @@ def to_openai_messages(system: str, messages: list[dict]) -> list[dict]:
 
 class OpenAICompatLLM:
     def __init__(self, api_key: str, model: str, base_url: str, max_tokens: int = 2048,
-                 http_client: httpx.AsyncClient | None = None, provider_name: str = "LLM"):
-        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client, max_retries=1)
+                 http_client: httpx.AsyncClient | None = None, provider_name: str = "LLM",
+                 reasoning_effort: str | None = None):
+        # default SDK timeout is 10 minutes; a stalled free-tier request must not freeze the chat
+        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client, max_retries=1,
+                                         timeout=httpx.Timeout(60.0, connect=10.0))
         self.model, self.max_tokens, self.provider = model, max_tokens, provider_name
+        self.reasoning_effort = reasoning_effort
 
     def _wrap(self, e: Exception) -> LLMError:
         p = self.provider
@@ -85,6 +89,8 @@ class OpenAICompatLLM:
             return LLMError(f"{p} does not know the model '{self.model}'. Set a valid model name in .env.", False)
         if isinstance(e, openai.RateLimitError):
             return LLMError(f"{p} rate limit reached (free tiers are limited). Wait a minute and retry.", True)
+        if isinstance(e, openai.APITimeoutError):
+            return LLMError(f"{p} took too long to answer. Please retry, or try a lighter model.", True)
         if isinstance(e, openai.APIConnectionError):
             return LLMError(f"Could not reach {p}. Check your connection and retry.", True)
         if isinstance(e, openai.APIStatusError) and e.status_code >= 500:
@@ -100,7 +106,8 @@ class OpenAICompatLLM:
         try:
             stream = await self.client.chat.completions.create(
                 model=self.model, max_tokens=self.max_tokens, temperature=0.2, stream=True,
-                messages=to_openai_messages(system, messages), tools=to_openai_tools(tools) or openai.NOT_GIVEN)
+                messages=to_openai_messages(system, messages), tools=to_openai_tools(tools) or openai.NOT_GIVEN,
+                reasoning_effort=self.reasoning_effort or openai.NOT_GIVEN)
             async for chunk in stream:
                 if not chunk.choices:
                     continue
@@ -174,7 +181,8 @@ def missing_key_message(s: Settings) -> str:
 def build_llm(s: Settings):
     """Return the configured LLM adapter, or None when it is not configured."""
     if s.llm_provider == "gemini" and s.gemini_api_key:
-        return OpenAICompatLLM(s.gemini_api_key, s.gemini_model, s.gemini_base_url, provider_name="Gemini")
+        return OpenAICompatLLM(s.gemini_api_key, s.gemini_model, s.gemini_base_url, provider_name="Gemini",
+                               reasoning_effort=s.gemini_reasoning_effort or None)
     if s.llm_provider == "openai" and s.llm_api_key and s.llm_model and s.llm_base_url:
         return OpenAICompatLLM(s.llm_api_key, s.llm_model, s.llm_base_url, provider_name="The LLM provider")
     if s.llm_provider == "anthropic" and s.anthropic_api_key:

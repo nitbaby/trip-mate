@@ -93,6 +93,7 @@ async def test_streams_text():
     assert final["content"] == [{"type": "text", "text": "Check-out is 11 AM [1]."}] and final["stop_reason"] == "stop"
     assert seen["auth"] == "Bearer test-key" and seen["url"].endswith("/v1beta/openai/chat/completions")
     assert seen["body"]["model"] == "gemini-test" and seen["body"]["stream"] is True
+    assert "reasoning_effort" not in seen["body"]  # only sent when configured
     assert seen["body"]["messages"][0] == {"role": "system", "content": "sys"}
 
 
@@ -134,7 +135,7 @@ async def test_error_mapping(status, retryable, fragment):
 def test_factory_selection():
     assert build_llm(Settings(_env_file=None, llm_provider="gemini")) is None
     g = build_llm(Settings(_env_file=None, llm_provider="gemini", gemini_api_key="k"))
-    assert isinstance(g, OpenAICompatLLM) and g.model == "gemini-2.5-flash"
+    assert isinstance(g, OpenAICompatLLM) and g.model == "gemini-3.5-flash" and g.reasoning_effort == "low"
     assert build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k")) is None  # needs model + url
     o = build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="m",
                            llm_base_url="https://api.groq.com/openai/v1"))

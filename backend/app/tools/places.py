@@ -57,8 +57,13 @@ def resolve_origin(location: str, lat: float | None, lng: float | None) -> tuple
     raise ValueError(f"Could not locate '{location}'. Provide lat/lng or a known place.")
 
 
+GENERIC = {"restaurant", "restaurants", "food", "place", "places", "near", "nearby", "vegetarian", "vegan",
+           "eat", "dinner", "lunch", "breakfast", "open", "good", "best", "cafe", "the", "a", "in", "to", "for"}
+
+
 def _mock(origin, query, vegetarian, radius_m):
-    q = (query or "").lower()
+    # drop generic words: "vegetarian restaurant" must not filter names/cuisines literally
+    q = " ".join(w for w in (query or "").lower().split() if w not in GENERIC)
     out = []
     for name, la, lo, rating, cuisine, veg, hours in MOCK_PLACES:
         d = haversine_m(origin, (la, lo))

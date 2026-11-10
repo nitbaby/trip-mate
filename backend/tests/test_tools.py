@@ -107,3 +107,10 @@ def test_confidence_levels():
     assert assess([h(0.38), h(0.28)])[0] == "high"           # same doc agrees
     assert assess([h(0.38, "a"), h(0.28, "b")])[0] == "low"  # different doc does not
     assert [x["score"] for x in assess([h(0.5), h(0.1)])[1]] == [0.5]
+
+
+def test_places_generic_query_words_do_not_filter(tid):
+    r = places.search_places("Shinjuku Granbell Hotel", "vegetarian restaurant", vegetarian=True,
+                             now=datetime.fromisoformat("2026-12-01T20:00:00"))
+    assert len(r["results"]) >= 2
+    assert places.search_places("shinjuku", "falafel", now=datetime.fromisoformat("2026-12-01T20:00:00"))["results"][0]["name"].startswith("Falafel")

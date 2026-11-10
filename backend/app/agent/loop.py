@@ -86,6 +86,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         system = system_prompt(trip)
         refs: dict[int, dict] = {}
         conf_levels: list[str] = []
+        wrote_itinerary = False
         tool_count = 0
 
         for _ in range(MAX_ITERATIONS):
@@ -132,6 +133,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
                         for k in ("chunk_id", "document_id", "trip_id", "doc_type"):
                             h.pop(k, None)
                 if ok and name == "write_itinerary":
+                    wrote_itinerary = True
                     yield {"type": "itinerary_updated", "itemId": res["item_id"], "action": res["action"],
                            "undoId": res["undo_id"]}
                 yield {"type": "tool_result", "toolCallId": tu["id"], "ok": ok, "summary": summarize(name, args, res)}
@@ -149,7 +151,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
                 cited.append(m)
         for m in cited:
             yield {"type": "citation", "marker": f"[{m}]", **refs[int(m)]}
-        if conf_levels:
+        if conf_levels and not wrote_itinerary:  # actions skip the confidence check (spec 3.3)
             level = max(conf_levels, key=RANK.get)
             if level != "none" and not cited:
                 level = "low"  # CHAT-02: no citation means no "high"

@@ -116,6 +116,7 @@ def test_flow5_itinerary_write_and_undo(client, trip):
     assert up["action"] == "created" and up["undoId"]
     items = client.get(f"/api/trips/{trip}/itinerary").json()
     assert items[0]["source"] == "agent" and items[0]["id"] == up["itemId"]
+    assert "confidence" not in types(ev)  # an action, not an answer
     assert client.post(f"/api/trips/{trip}/undo/{up['undoId']}").status_code == 200
     assert client.get(f"/api/trips/{trip}/itinerary").json() == []
 
