@@ -93,6 +93,9 @@ class OpenAICompatLLM:
             return LLMError(f"{p} took too long to answer. Please retry, or try a lighter model.", True)
         if isinstance(e, openai.APIConnectionError):
             return LLMError(f"Could not reach {p}. Check your connection and retry.", True)
+        if isinstance(e, openai.APIStatusError) and e.status_code == 402:
+            return LLMError(f"{p} says the prepaid credits for this API key's project are used up. "
+                            "Check billing in Google AI Studio, or use a key from a free-tier project.", False)
         if isinstance(e, openai.APIStatusError) and e.status_code >= 500:
             return LLMError(f"{p} is having problems. Please retry.", True)
         if isinstance(e, openai.APIStatusError):

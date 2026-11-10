@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # LLM provider: gemini (default) | openai (any OpenAI-compatible API, e.g. Groq) | anthropic
     llm_provider: str = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     gemini_reasoning_effort: str = "low"  # keeps "thinking" short so replies start fast and fit max_tokens
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_api_key: str = ""      # for llm_provider=openai

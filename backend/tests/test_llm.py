@@ -124,7 +124,7 @@ async def test_bad_tool_arguments_become_empty_dict():
 @pytest.mark.parametrize("status,retryable,fragment", [
     (401, False, "rejected the API key"), (403, False, "rejected the API key"),
     (404, False, "does not know the model"), (429, True, "rate limit"), (503, True, "problems"),
-    (400, False, "rejected the request")])
+    (400, False, "rejected the request"), (402, False, "credits")])
 async def test_error_mapping(status, retryable, fragment):
     llm = llm_with(lambda r: httpx.Response(status, json={"error": {"message": "x", "status": "E"}}))
     with pytest.raises(LLMError) as e:
@@ -135,7 +135,7 @@ async def test_error_mapping(status, retryable, fragment):
 def test_factory_selection():
     assert build_llm(Settings(_env_file=None, llm_provider="gemini")) is None
     g = build_llm(Settings(_env_file=None, llm_provider="gemini", gemini_api_key="k"))
-    assert isinstance(g, OpenAICompatLLM) and g.model == "gemini-3.5-flash" and g.reasoning_effort == "low"
+    assert isinstance(g, OpenAICompatLLM) and g.model == "gemini-3.5-flash-lite" and g.reasoning_effort == "low"
     assert build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k")) is None  # needs model + url
     o = build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="m",
                            llm_base_url="https://api.groq.com/openai/v1"))
