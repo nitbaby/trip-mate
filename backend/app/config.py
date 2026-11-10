@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
     conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
     agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
+    # Rate limits for the LLM API. -1 = provider default (gemini: 12 requests/min [free tier allows 15], 500/day); 0 = unlimited.
+    llm_max_rpm: int = -1
+    llm_daily_limit: int = -1
+    llm_quota_tz: str = "America/Los_Angeles"   # Google resets daily quotas at midnight Pacific
+    llm_max_wait_seconds: int = 65               # >= one full per-minute window; longer waits fail fast instead of freezing the chat
     max_tools_per_turn: int = 6
     max_external_calls_per_session: int = 30
 

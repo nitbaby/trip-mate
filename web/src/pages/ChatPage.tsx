@@ -24,6 +24,13 @@ function Assistant({ m, onCite, onRetry, last }: { m: AssistantMessage; onCite: 
   const streaming = m.status === "streaming";
   return (
     <div className="max-w-[92%] space-y-2 self-start">
+      {m.waiting && m.status === "streaming" && (
+        <p role="status" className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+          ⏳ {m.waiting.reason === "rate_limit"
+            ? `Waiting for the assistant's rate limit (about ${m.waiting.seconds} s)…`
+            : `The assistant is busy, retrying in ${m.waiting.seconds} s…`}
+        </p>
+      )}
       {m.agents.length === 0 && m.tools.map((t) => <ToolCard key={t.id} tool={t} />)}
       {m.agents.map((a) => (
         <section key={a.name} aria-label={a.label} className="space-y-1.5">
@@ -45,6 +52,11 @@ function Assistant({ m, onCite, onRetry, last }: { m: AssistantMessage; onCite: 
           {m.verification.unsupported
             ? `⚠ ${m.verification.unsupported} of ${m.verification.checked} source(s) removed: the passage didn't support the statement.`
             : `✓ ${m.verification.checked} source${m.verification.checked > 1 ? "s" : ""} checked against your documents.`}
+        </p>
+      )}
+      {m.quota && m.quota.used >= m.quota.limit * 0.9 && (
+        <p role="note" className="text-xs text-amber-700 dark:text-amber-300">
+          Daily assistant budget: {m.quota.used} of {m.quota.limit} requests used. It resets at midnight Pacific time.
         </p>
       )}
       {m.itinerary.length > 0 && <p className="text-sm text-violet-700 dark:text-violet-300">✓ Itinerary updated by TripMate</p>}

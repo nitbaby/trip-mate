@@ -6,7 +6,15 @@ export const newAssistant = (id: string): AssistantMessage => ({
 
 /** Pure: fold one streamed event into the assistant message (spec 5.2 client behaviour). */
 export function applyEvent(m: AssistantMessage, e: ChatEvent): AssistantMessage {
+  // any progress (not another wait) means the wait is over
+  const next = fold(e.type === "waiting" ? m : m.waiting ? { ...m, waiting: undefined } : m, e);
+  return next;
+}
+
+function fold(m: AssistantMessage, e: ChatEvent): AssistantMessage {
   switch (e.type) {
+    case "waiting":
+      return { ...m, waiting: { seconds: e.seconds, reason: e.reason } };
     case "token":
       return { ...m, text: m.text + e.text };
     case "agent_start":
@@ -33,7 +41,7 @@ export function applyEvent(m: AssistantMessage, e: ChatEvent): AssistantMessage 
     case "error":
       return { ...m, status: "error", error: { message: e.message, retryable: e.retryable } };
     case "done":
-      return { ...m, id: e.messageId, status: "done" };
+      return { ...m, id: e.messageId, status: "done", quota: e.quota };
   }
 }
 

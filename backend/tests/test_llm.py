@@ -23,9 +23,17 @@ def sse(*deltas, finish="stop"):
     return "".join(f"data: {json.dumps(c)}\n\n" for c in out) + "data: [DONE]\n\n"
 
 
-def llm_with(handler, model="gemini-test"):
+SLEPT: list[float] = []
+
+
+async def fake_sleep(seconds):
+    SLEPT.append(seconds)
+
+
+def llm_with(handler, model="gemini-test", **kw):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return OpenAICompatLLM("test-key", model, "http://mock.local/v1beta/openai/", http_client=client, provider_name="Gemini")
+    return OpenAICompatLLM("test-key", model, "http://mock.local/v1beta/openai/", http_client=client, provider_name="Gemini",
+                           sleep=fake_sleep, **kw)
 
 
 def stream_response(body):

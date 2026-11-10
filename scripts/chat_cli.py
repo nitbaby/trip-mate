@@ -38,7 +38,11 @@ with httpx.stream("POST", f"{a.url}/api/trips/{a.trip_id}/chat", timeout=120,
             print(f"  [verify] {e['reason']}")
         elif t == "itinerary_updated":
             print(f"\n  [itinerary] {e['action']} {e['itemId']} (undo id: {e.get('undoId')})")
+        elif t == "waiting":
+            why = "rate limit" if e["reason"] == "rate_limit" else "provider busy, retrying"
+            print(f"\n  [waiting] {e['seconds']} s ({why})", flush=True)
         elif t == "error":
             print(f"\n  [error] {e['code']}: {e['message']} (retryable={e['retryable']})")
         elif t == "done":
-            print(f"\n  [done] message {e['messageId']}")
+            q = e.get("quota")
+            print(f"\n  [done] message {e['messageId']} llm_calls={e.get('llmCalls')}" + (f" daily={q['used']}/{q['limit']}" if q else ""))

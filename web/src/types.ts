@@ -15,7 +15,10 @@ export interface ItineraryItem {
 }
 export interface TripDetail extends Trip { itinerary: ItineraryItem[]; documents: TripDoc[] }
 export interface Integration { name: string; provider: string; mode: string; last_contacted: string | null }
-export interface StatusInfo { live_mode: string; llm_provider: string; llm_configured: boolean; integrations: Integration[] }
+export interface StatusInfo {
+  live_mode: string; llm_provider: string; llm_configured: boolean; integrations: Integration[];
+  llm_limits?: { rpm: number; daily_limit: number; requests_today: number | null; model: string } | null;
+}
 export interface ChunkView {
   chunk_id: string; document_id: string; document_name: string; page: number; text: string;
   surrounding: { id: string; page: number; text: string }[];
@@ -35,7 +38,8 @@ export type ChatEvent =
   | { type: "verify"; reason: string }
   | { type: "itinerary_updated"; itemId: string; action: "created" | "updated" | "deleted"; undoId?: string }
   | { type: "error"; code: string; message: string; retryable: boolean }
-  | { type: "done"; messageId: string; agentMode?: "single" | "multi"; llmCalls?: number; toolCalls?: number };
+  | { type: "waiting"; seconds: number; reason: "rate_limit" | "retry"; agent?: string }
+  | { type: "done"; messageId: string; agentMode?: "single" | "multi"; llmCalls?: number; toolCalls?: number; quota?: { used: number; limit: number } };
 
 export interface ToolCall { id: string; name: string; label: string; status: "running" | "ok" | "failed"; summary?: string; agent?: string }
 export interface AgentRun { name: string; label: string; status: "running" | "done" }
@@ -44,6 +48,8 @@ export interface UserMessage { id: string; role: "user"; text: string }
 export interface AssistantMessage {
   id: string; role: "assistant"; text: string; tools: ToolCall[]; agents: AgentRun[]; citations: Record<string, Citation>;
   verification?: { checked: number; unsupported: number };
+  waiting?: { seconds: number; reason: "rate_limit" | "retry" };   // queued for the LLM rate limit / backing off
+  quota?: { used: number; limit: number };                        // daily LLM request budget, when one applies
   confidence?: "high" | "low" | "none"; verify?: string;
   itinerary: { itemId: string; action: string; undoId?: string }[];
   error?: { message: string; retryable: boolean };

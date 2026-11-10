@@ -18,6 +18,7 @@ from ..db import connect, new_id, now_iso
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
+from .ratelimit import quota_status
 from .router import AGENTS, route
 from .verify import verify_citations
 
@@ -113,7 +114,9 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
         final, last_text = None, ""
         turn.llm_calls += 1
         async for kind, payload in llm.turn(system, tools, messages):
-            if kind == "text":
+            if kind == "wait":  # the adapter is queued for the rate limit or backing off: tell the UI
+                yield {"type": "waiting", **payload, **tag}
+            elif kind == "text":
                 last_text += payload
                 accumulated += payload
                 if stream_text:
@@ -239,7 +242,9 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
     final = None
     async for kind, payload in llm.turn(composer_prompt(turn.trip, turn.prefs), [],
                                         [{"role": "user", "content": f"Question: {user_message}\n\nSpecialist answers:\n\n{findings}"}]):
-        if kind == "text":
+        if kind == "wait":
+            yield {"type": "waiting", **payload, "agent": "composer"}
+        elif kind == "text":
             turn.streamed += payload
             yield {"type": "token", "text": payload}
         else:
@@ -294,7 +299,14 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             yield {"type": "verify", "reason": reason}
         mid = _save(conn, conversation_id, "assistant", full_text)
         saved_assistant = True
-        yield {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
+        done = {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
+        try:
+            quota = quota_status(s)
+        except Exception:  # noqa: BLE001 - a quota read must never break an answer
+            quota = None
+        if quota:
+            done["quota"] = {"used": quota["used"], "limit": quota["limit"]}
+        yield done
     except (LLMError, anthropic.APIError, ValueError, RuntimeError) as e:
         if isinstance(e, LLMError):
             err = {"code": "AGENT_FAILED", "message": e.message, "retryable": e.retryable}
