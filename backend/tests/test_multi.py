@@ -90,9 +90,14 @@ def test_verifier_real_gemini_answers():
 
 
 # ---------- single specialist ----------
-def test_docs_agent_answers_directly_with_verified_citation(client, trip):
-    llm = ScriptedLLM([{"tools": [("search_docs", {"query": Q_HOTEL})]},
-                       {"text": "Check-out is 11:00 AM and breakfast is included [1]."}])
+def _hash_friendly_prefetch(monkeypatch):
+    """Tests use the hash embedder, which scores long natural-language queries low: prefetch a keyword query instead."""
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: Q_HOTEL if agent == "docs" else None)
+
+
+def test_docs_agent_answers_directly_with_verified_citation(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    llm = ScriptedLLM([{"text": "Check-out is 11:00 AM and breakfast is included [1]."}])  # search_docs is prefetched
     ev = chat(client, trip, "What time is check-out, and does the hotel include breakfast?", llm)
     t = types(ev)
     assert t[0] == "agent_start" and ev[0]["agent"] == "docs" and ev[0]["label"] == "Documents agent"
@@ -101,15 +106,14 @@ def test_docs_agent_answers_directly_with_verified_citation(client, trip):
     assert next(e for e in ev if e["type"] == "verified") == {"type": "verified", "checked": 1, "unsupported": 0}
     assert "citation" in t and next(e for e in ev if e["type"] == "confidence")["level"] == "high"
     done = ev[-1]
-    assert done["agentMode"] == "multi" and done["llmCalls"] == 2 and done["toolCalls"] == 1  # no router/composer calls
+    assert done["agentMode"] == "multi" and done["llmCalls"] == 1 and done["toolCalls"] == 1  # prefetched search, no router/composer calls
     # the docs agent only sees its own tool, with a role-specific prompt
     assert [t["name"] for t in llm.calls[0]["tools"]] == ["search_docs"]
     assert "Documents agent" not in llm.calls[0]["system"] and "documents agent" in llm.calls[0]["system"]
 
 
 def test_unsupported_citation_is_dropped_and_confidence_lowered(client, trip):
-    llm = ScriptedLLM([{"tools": [("search_docs", {"query": Q_HOTEL})]},
-                       {"text": "Check-out is at 9:45 PM [1]."}])  # wrong time: not in the passage
+    llm = ScriptedLLM([{"text": "Check-out is at 9:45 PM [1]."}])  # wrong time: not in the passage
     ev = chat(client, trip, "What time is check-out?", llm)
     assert next(e for e in ev if e["type"] == "verified")["unsupported"] == 1
     assert "citation" not in types(ev)
@@ -117,8 +121,7 @@ def test_unsupported_citation_is_dropped_and_confidence_lowered(client, trip):
 
 
 def test_live_agent_has_live_tools_and_docs_lookup(client, trip):
-    llm = ScriptedLLM([{"tools": [("search_docs", {"query": "flight number departure"}),
-                                  ("get_flight_status", {"flight_number": "JL44", "date": "2026-11-30"})]},
+    llm = ScriptedLLM([{"tools": [("get_flight_status", {"flight_number": "JL44", "date": "2026-11-30"})]},
                        {"text": "JL 44 is delayed by 35 minutes."}])
     ev = chat(client, trip, "Is my 6 PM flight delayed?", llm)
     assert ev[0]["agent"] == "live"
@@ -132,7 +135,7 @@ def test_agent_cannot_call_tools_outside_its_allowlist(client, trip):
                                                       "start_at": "2026-12-02T20:00:00"})]},
                        {"text": "I can't change the itinerary."}])
     ev = chat(client, trip, "What does my hotel confirmation say?", llm)  # routed to docs
-    tr = next(e for e in ev if e["type"] == "tool_result")
+    tr = [e for e in ev if e["type"] == "tool_result"][-1]
     assert tr["ok"] is False and "not available" in tr["summary"]
     assert client.get(f"/api/trips/{trip}/itinerary").json() == []
     assert "itinerary_updated" not in types(ev)
@@ -150,8 +153,9 @@ def test_itinerary_agent_writes_with_undo(client, trip):
 
 
 # ---------- compound question: parallel specialists + composer ----------
-def test_compound_question_runs_specialists_then_composer(client, trip):
-    docs_turns = [{"tools": [("search_docs", {"query": Q_HOTEL})]}, {"text": "Check-out is 11:00 AM [1]."}]
+def test_compound_question_runs_specialists_then_composer(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    docs_turns = [{"text": "Check-out is 11:00 AM [1]."}]
     live_turns = [{"tools": [("get_weather", {"location": "Tokyo", "days": 2})]}, {"text": "Tokyo will be clear, 13C."}]
 
     class Router:  # dispatch by system prompt so parallel ordering doesn't matter
@@ -181,7 +185,7 @@ def test_compound_question_runs_specialists_then_composer(client, trip):
     assert "Documents agent" in llm.composer_input and "Live info agent" in llm.composer_input
     assert "[1]" in llm.composer_input  # citation markers pass through to the composer
     assert next(e for e in ev if e["type"] == "verified")["unsupported"] == 0
-    assert ev[-1]["llmCalls"] == 5 and ev[-1]["toolCalls"] == 2
+    assert ev[-1]["llmCalls"] == 4 and ev[-1]["toolCalls"] == 2  # docs: prefetched search + answer; live: 2; composer: 1
 
 
 def test_failure_in_one_specialist_ends_the_turn_with_an_error(client, trip):
@@ -207,3 +211,24 @@ def test_multi_is_the_default_mode_and_single_still_available(client, trip, monk
         evs = [json.loads(line[5:]) for line in r.iter_lines() if line.startswith("data:")]
     assert evs[-1]["agentMode"] == "single" and "agent_start" not in types(evs)
     assert client.post(f"/api/trips/{trip}/chat", json={"message": "hi", "agentMode": "bogus"}).status_code == 422
+
+
+# ---------- small-model safeguards ----------
+def test_docs_agent_searches_even_if_the_model_would_not(client, trip):
+    llm = ScriptedLLM([{"text": "I couldn't find it in your documents."}])
+    ev = chat(client, trip, "What is the wifi password at the airport lounge?", llm)
+    names = [e["name"] for e in ev if e["type"] == "tool_start"]
+    assert names == ["search_docs"] and ev[-1]["llmCalls"] == 1
+
+
+def test_failed_itinerary_write_is_never_reported_as_done(client, trip):
+    llm = ScriptedLLM([{"tools": [("write_itinerary", {"action": "create", "type": "reservation",
+                                                      "start_at": "2026-12-02T20:00:00"})]},  # no title: rejected
+                       {"text": "I've added dinner at 8 PM to your itinerary."}])  # the model lies
+    ev = chat(client, trip, "Add dinner at 8 PM tomorrow to my itinerary", llm)
+    assert [e for e in ev if e["type"] == "tool_result"][-1]["ok"] is False
+    said = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert "NOT changed" in said
+    assert client.get(f"/api/trips/{trip}/itinerary").json() == []
+    # the model is told the change did not happen
+    assert "NOT changed" in json.dumps(llm.calls[1]["messages"])
