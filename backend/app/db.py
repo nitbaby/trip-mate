@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS undo_log (
   id TEXT PRIMARY KEY, trip_id TEXT NOT NULL, action TEXT NOT NULL, item_id TEXT NOT NULL,
   before TEXT, created_at TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS usage (
+  conversation_id TEXT PRIMARY KEY, external_calls INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS api_cache (
   key TEXT PRIMARY KEY, payload TEXT NOT NULL, fetched_at TEXT NOT NULL, ttl_seconds INTEGER NOT NULL);
 """

@@ -1,0 +1,58 @@
+import json
+
+from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
+
+from ..agent.llm import AnthropicLLM
+from ..agent.loop import new_conversation_id, run_turn
+from ..config import get_settings
+from ..db import connect, row_to_dict
+from ..errors import not_found
+
+router = APIRouter(prefix="/api/trips/{trip_id}", tags=["chat"])
+
+
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    conversationId: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+def _llm(request: Request):
+    llm = getattr(request.app.state, "llm", None)
+    if llm:
+        return llm
+    s = get_settings()
+    return AnthropicLLM(s.anthropic_api_key, s.anthropic_model) if s.anthropic_api_key else None
+
+
+@router.post("/chat")
+async def chat(trip_id: str, body: ChatIn, request: Request):
+    with connect() as c:
+        row = c.execute("SELECT * FROM trips WHERE id=?", (trip_id,)).fetchone()
+        if not row:
+            raise not_found("Trip")
+        trip = row_to_dict(row, ("destinations",))
+    cid = body.conversationId or new_conversation_id()
+    llm = _llm(request)
+
+    async def events():
+        if llm is None:
+            yield {"data": json.dumps({"type": "error", "code": "AGENT_FAILED", "retryable": False,
+                                       "message": "ANTHROPIC_API_KEY is not set. Add it to .env and restart."})}
+            return
+        async for ev in run_turn(trip=trip, conversation_id=cid, user_message=body.message, llm=llm,
+                                 hub=request.app.state.hub):
+            yield {"data": json.dumps(ev)}
+
+    return EventSourceResponse(events(), headers={"X-Conversation-Id": cid})
+
+
+@router.get("/conversations/{conversation_id}/messages")
+def messages(trip_id: str, conversation_id: str, limit: int = 100):
+    with connect() as c:
+        rows = c.execute("""SELECT m.id, m.role, m.content, m.created_at FROM messages m
+                            JOIN conversations v ON v.id = m.conversation_id
+                            WHERE v.id=? AND v.trip_id=? ORDER BY m.rowid DESC LIMIT ?""",
+                         (conversation_id, trip_id, max(1, min(limit, 200)))).fetchall()
+        return [dict(r) for r in reversed(rows)]

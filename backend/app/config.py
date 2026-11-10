@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     live_mode: str = "mock"  # mock | real
     embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
+    # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6
+    conf_high: float = 0.45
+    conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
+    conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
+    max_tools_per_turn: int = 6
+    max_external_calls_per_session: int = 30
 
     @property
     def db_path(self) -> Path:

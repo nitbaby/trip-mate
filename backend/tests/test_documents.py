@@ -94,3 +94,12 @@ def test_relative_data_dir_is_anchored_to_repo_root(monkeypatch):
 
         shutil.rmtree(config.REPO_ROOT / "data-reltest", ignore_errors=True)
         config.get_settings.cache_clear()
+
+
+def test_chunks_are_paragraph_sized():
+    from app.ingest.chunk import chunk_page
+
+    text = "\n\n".join(f"Paragraph {i}. " + "word " * 40 for i in range(6)) + "\n\n" + "x" * 1200
+    chunks = chunk_page(text)
+    assert all(len(c) <= 450 for c in chunks) and len(chunks) >= 7
+    assert chunk_page("tiny") == ["tiny"]

@@ -25,6 +25,8 @@ def ingest_document(doc_id: str) -> None:
         if not doc:
             return
         _set_status(conn, doc_id, "processing")
+        conn.execute("DELETE FROM chunks WHERE document_id=?", (doc_id,))  # idempotent: safe for re-index
+        vectors.delete_document(doc_id)
         from ..config import get_settings
 
         path = Path(get_settings().uploads_dir) / doc_id / doc["filename"]

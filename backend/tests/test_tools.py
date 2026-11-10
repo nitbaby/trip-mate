@@ -95,3 +95,15 @@ def test_search_docs_unknown_trip_is_an_error(client):
     with pytest.raises(ApiError) as e:
         impl.search_docs("missing", "check-out")
     assert e.value.code == "NOT_FOUND"
+
+
+def test_confidence_levels():
+    from app.confidence import assess
+
+    h = lambda s, d="a": {"score": s, "document_id": d}
+    assert assess([h(0.6)])[0] == "high"
+    assert assess([h(0.1), h(0.05)]) == ("none", [])
+    assert assess([h(0.30)])[0] == "low"
+    assert assess([h(0.38), h(0.28)])[0] == "high"           # same doc agrees
+    assert assess([h(0.38, "a"), h(0.28, "b")])[0] == "low"  # different doc does not
+    assert [x["score"] for x in assess([h(0.5), h(0.1)])[1]] == [0.5]

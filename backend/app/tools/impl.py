@@ -1,5 +1,6 @@
 """Tool implementations. Used by the MCP server (and tests). Every tool returns plain JSON-able dicts."""
 from .. import vectors
+from ..confidence import assess
 from ..db import connect
 from ..errors import not_found
 from ..ingest.mask import redact
@@ -12,13 +13,16 @@ def search_docs(trip_id: str, query: str, doc_type: str | None = None, k: int = 
         if not c.execute("SELECT 1 FROM trips WHERE id=?", (trip_id,)).fetchone():
             raise not_found("Trip")  # an unknown trip must not look like "no matching documents"
     hits = vectors.query(trip_id, query, k=max(1, min(k, 10)), doc_type=doc_type)
+    best = hits[0]["score"] if hits else None
+    confidence, hits = assess(hits)
     with connect() as c:
         for h in hits:
             r = c.execute("""SELECT ch.page, d.filename FROM chunks ch JOIN documents d ON d.id=ch.document_id
                              WHERE ch.id=?""", (h["chunk_id"],)).fetchone()
             h["page"], h["document_name"] = (r["page"], r["filename"]) if r else (None, None)
             h["text"] = redact(h["text"])  # sensitive values never reach the model (spec 8: redact before cloud)
-    return {"query": query, "results": hits}
+    return {"query": query, "confidence": confidence, "results": hits,
+            "closest_score": best if confidence == "none" else None}
 
 
 def read_itinerary(trip_id: str, date_from: str | None = None, date_to: str | None = None) -> dict:
