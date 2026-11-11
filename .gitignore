@@ -13,3 +13,4 @@ test-results/
 .DS_Store
 .idea/
 models/
+rag_report.html
