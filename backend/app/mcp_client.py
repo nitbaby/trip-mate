@@ -16,7 +16,7 @@ class McpToolClient:
 
     async def __aenter__(self):
         st = get_settings()  # the SDK passes only a minimal env, so forward what the tools need (never the API key)
-        env = {"TRIPMATE_DATA_DIR": str(st.tripmate_data_dir), "LIVE_MODE": st.live_mode, "EMBEDDINGS": st.embeddings}
+        env = {"TRIPMATE_DATA_DIR": str(st.tripmate_data_dir), "LIVE_MODE": st.live_mode, "LIVE_FLIGHTS": st.live_flights, "EMBEDDINGS": st.embeddings}
         params = StdioServerParameters(command=sys.executable, args=["-m", "tripmate_mcp.server"], env=env)
         read, write = await self._stack.enter_async_context(stdio_client(params))
         self.session = await self._stack.enter_async_context(ClientSession(read, write))

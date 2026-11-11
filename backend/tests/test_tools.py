@@ -114,3 +114,37 @@ def test_places_generic_query_words_do_not_filter(tid):
                              now=datetime.fromisoformat("2026-12-01T20:00:00"))
     assert len(r["results"]) >= 2
     assert places.search_places("shinjuku", "falafel", now=datetime.fromisoformat("2026-12-01T20:00:00"))["results"][0]["name"].startswith("Falafel")
+
+
+def test_sibling_chunks_of_the_best_document_are_kept_below_the_threshold():
+    from app.confidence import assess
+    hits = [{"score": 0.69, "document_id": "a"}, {"score": 0.32, "document_id": "b"},
+            {"score": 0.24, "document_id": "a"}, {"score": 0.20, "document_id": "c"}, {"score": 0.12, "document_id": "a"}]
+    level, usable = assess(hits)
+    assert level == "high" and [h["score"] for h in usable] == [0.69, 0.32, 0.24]
+    assert assess([{"score": 0.2, "document_id": "a"}, {"score": 0.19, "document_id": "a"}]) == ("none", [])
+
+
+def test_flights_stay_mock_when_live_mode_is_real(monkeypatch):
+    from app import config
+    from app.tools import cache, flights
+    monkeypatch.setenv("LIVE_MODE", "real")
+    monkeypatch.delenv("LIVE_FLIGHTS", raising=False)
+    config.get_settings.cache_clear()
+    cache.cache_clear() if hasattr(cache, "cache_clear") else None
+    try:
+        assert flights.get_flight_status("JL 44", "2026-11-30")["source"] == "mock"
+        monkeypatch.setenv("LIVE_FLIGHTS", "real")  # explicit opt-in: no provider yet, so it must say so
+        config.get_settings.cache_clear()
+        with pytest.raises(NotImplementedError):
+            flights.get_flight_status("JL 44", "2026-11-30")
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_status_reports_flights_mock_under_real_mode(client, tid, monkeypatch):
+    from app import config
+    monkeypatch.setenv("LIVE_MODE", "real")
+    config.get_settings.cache_clear()
+    items = {i["name"]: i for i in client.get(f"/api/trips/{tid}/status").json()["integrations"]}
+    assert items["flight"]["mode"] == "mock" and items["weather"]["mode"] == "real" and items["fx"]["mode"] == "real"

@@ -84,7 +84,7 @@ def test_demo_provider_multi_agent_flows_and_compound_question(client, monkeypat
         return evs
 
     ev = ask("What time is check-out, and does the hotel include breakfast?")
-    assert ev[0]["agent"] == "docs" and "citation" in types(ev) and ev[-1]["llmCalls"] == 2
+    assert ev[0]["agent"] == "docs" and "citation" in types(ev) and ev[-1]["llmCalls"] == 1
 
     ev = ask("Is my 6 PM flight delayed?")
     assert ev[0]["agent"] == "live" and "delayed by 35 minutes" in "".join(e.get("text", "") for e in ev)
@@ -100,4 +100,4 @@ def test_demo_provider_multi_agent_flows_and_compound_question(client, monkeypat
     # both specialists contributed (the test-only hash embedder may legitimately miss the doc passage on a long
     # compound query; citations through the composer are covered in test_multi.py)
     assert "Forecast for" in answer and ("Check-out" in answer or "couldn't find" in answer)
-    assert ev[-1]["type"] == "done" and ev[-1]["llmCalls"] == 5
+    assert ev[-1]["type"] == "done" and ev[-1]["llmCalls"] == 4

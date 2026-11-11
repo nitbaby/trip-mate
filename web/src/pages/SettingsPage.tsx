@@ -27,6 +27,12 @@ export default function SettingsPage() {
             <p className="mb-2 text-sm text-slate-500">
               Assistant: <strong>{status.data.llm_provider}</strong> {status.data.llm_configured ? "✓ ready" : "✗ no API key set"} · Live data: <strong>{status.data.live_mode}</strong>
             </p>
+            {status.data.llm_limits && (
+              <p className="mb-2 text-sm text-slate-500">
+                Assistant limits: {status.data.llm_limits.rpm ? `${status.data.llm_limits.rpm} requests/min` : "no per-minute limit"}
+                {status.data.llm_limits.daily_limit ? ` · ${status.data.llm_limits.requests_today ?? 0} of ${status.data.llm_limits.daily_limit} used today` : ""}
+              </p>
+            )}
             <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
               {status.data.integrations.map((i) => (
                 <li key={i.name} className="flex items-center justify-between gap-3 p-3 text-sm">

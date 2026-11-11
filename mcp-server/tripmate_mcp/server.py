@@ -36,7 +36,8 @@ def search_docs(trip_id: str, query: str, doc_type: str | None = None) -> str:
 
 @mcp.tool()
 def read_itinerary(trip_id: str, date_from: str | None = None, date_to: str | None = None) -> str:
-    """Read itinerary items for a trip, optionally between ISO datetimes. Includes conflicts_with for overlaps."""
+    """Read itinerary items for a trip, optionally between two dates or ISO datetimes (a date-only date_to includes that whole day,
+    so date_from=date_to=2026-12-01 returns everything on Dec 1). Includes conflicts_with for overlaps."""
     return _run(impl.read_itinerary, trip_id, date_from, date_to)
 
 
@@ -45,7 +46,9 @@ def write_itinerary(trip_id: str, action: str, item_id: str | None = None, type:
                     title: str | None = None, start_at: str | None = None, end_at: str | None = None,
                     location: str | None = None, notes: str | None = None) -> str:
     """Create, update or delete an itinerary item. action: create|update|delete. type: flight, hotel,
-    reservation, activity, transit or note. Times are ISO 8601 local to the trip. Returns an undo_id."""
+    reservation, activity, transit or note. Times are ISO 8601 local to the trip, e.g. 2026-12-02T20:00:00.
+    action=create REQUIRES type, title (a short name such as "Dinner") and start_at. update and delete REQUIRE item_id.
+    Returns an undo_id."""
     return _run(impl.write_itinerary, trip_id, action, item_id, type, title, start_at, end_at, location, notes)
 
 

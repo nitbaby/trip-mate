@@ -59,6 +59,16 @@ describe("applyEvent", () => {
     expect(m.tools[0]).toMatchObject({ agent: "docs", status: "ok" });
     expect(m.verification).toEqual({ checked: 2, unsupported: 1 });
   });
+  it("shows a wait until the next progress event, and keeps the daily quota", () => {
+    let m = run([{ type: "waiting", seconds: 8, reason: "rate_limit" }]);
+    expect(m.waiting).toEqual({ seconds: 8, reason: "rate_limit" });
+    m = applyEvent(m, { type: "waiting", seconds: 3, reason: "retry" });
+    expect(m.waiting?.reason).toBe("retry");
+    m = applyEvent(m, { type: "token", text: "Hi" });
+    expect(m.waiting).toBeUndefined();
+    m = applyEvent(m, { type: "done", messageId: "m1", quota: { used: 460, limit: 500 } });
+    expect(m.quota).toEqual({ used: 460, limit: 500 });
+  });
   it("keeps partial text on error and flags low confidence", () => {
     const m = run([{ type: "token", text: "Partial" }, { type: "error", code: "AGENT_FAILED", message: "busy", retryable: true }]);
     expect(m).toMatchObject({ text: "Partial", status: "error", error: { retryable: true } });

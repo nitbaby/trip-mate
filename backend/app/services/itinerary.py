@@ -39,6 +39,8 @@ def list_items(c, trip_id, date_from=None, date_to=None) -> list[dict]:
         q += " AND start_at >= ?"
         args.append(date_from)
     if date_to:
+        if len(date_to) == 10:  # a bare date means "through the end of that day"
+            date_to += "T23:59:59"
         q += " AND start_at <= ?"
         args.append(date_to)
     items = [dict(r) for r in c.execute(q + " ORDER BY start_at", args)]

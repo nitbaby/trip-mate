@@ -1,87 +1,155 @@
 # TripMate MVP Implementation Plan
 
-Source of truth for *what* to build: `docs/tripmate_spec.md` (requirement IDs, API, data model) and `docs/tripmate_overview.md`.
-This file is the *how/when* and the running status. **Update the status checkboxes and "Decisions/Notes" as work proceeds.**
+**This file is the handoff.** A new session should be able to continue from this file alone (plus `CLAUDE.md`, which points here).
+What to build: `docs/tripmate_spec.md` (requirement IDs, API, data model) and `docs/tripmate_overview.md`. How it fits together: `docs/ARCHITECTURE.md`.
+Keep this file current: tick phases, update "Current state", and add only *non-obvious* learnings to the notes log.
 
-Assumption: one developer working with Claude (not the spec's team of 4–5), so phases are ordered to reach a demo early.
+Assumption: one developer working with Claude (not the spec's team of 4-5), ordered to reach a demo early.
 
-## Repo layout (single git repo, root = this folder)
+---
+
+## 1. Current state (as of 2026-11-11)
+
+- Repo: `/Users/A-7878/Learning/trip-mate` (git, branch **`multi-agent-mode`**, all work committed; `main` is behind). Old copy at `/Users/A-7878/Learning/Claude_Learnings/TripMate` is a stale leftover: ignore it, never work there.
+- Remote `origin` = https://github.com/nitbaby/trip-mate. **Not pushed:** the first push failed with `403 Your account is suspended` (GitHub account issue, user must resolve). Retry `git push -u origin main` only when the user says so.
+- Done and working: backend (trips, docs ingestion, RAG, itinerary, undo), MCP tool server (7 tools), agent runtime in **multi-agent mode by default** (router -> specialists -> composer -> citation verifier; single-agent mode still available), React PWA UI (chat, itinerary, docs, settings), demo stand-in LLM.
+- Tests: **111 backend** (`make test`, ~2-3 min) + **16 web** (`make test-web`). Both must stay green. Run the backend suite with no `LLM_*`/`TRIPMATE_DATA_DIR` variables exported (they leak into `test_factory_selection`).
+- LLM status: default provider is Gemini (`gemini-3.5-flash-lite`) and **the user's key works** (verified 2026-11-10 with `scripts/llm_check.py`). User-stated limits: **15 requests/minute, 500/day**. Earlier the same day the API returned HTTP 402 "prepayment credits are depleted" for two models; it later worked again (cause unknown, possibly billing/quota state changed). If 402 or 429 appears, see Notes. Budget real-LLM runs: one question = 2-5 requests (compound multi-agent questions up to 5), so ~3 questions/minute and ~100-250 questions/day; `compare_modes.py` over 7 questions x 2 modes is ~40 requests.
+- **Next step: Phase 6 (eval set + runner, optional Playwright E2E, `make seed`/`make demo`, docs).** Phase 5 (offline PWA) and the accessibility pass were dropped by the user on 2026-11-11. Phase 4c is done (below).
+
+### How to run things
 ```
-backend/     FastAPI: REST + SSE, agent loop, RAG, confidence, trip services, MCP client  (package `app`)
-mcp-server/  Python MCP server: search_docs, read/write_itinerary, live-data tools (imports backend `app` for DB/vectors)
-web/         React + Vite + TS + Tailwind PWA
-samples/     fake hotel confirmation, flight itinerary, Japan medication rules, etc.
-eval/        30–50 question eval set + runner
-e2e/         Playwright tests (phone viewport) for the 5 demo flows
-scripts/     dev, seed, demo-reset helpers
-docs/        spec, overview, this plan
+make setup                       # venv + deps + .env from .env.example (then user adds keys)
+make dev-backend                 # API on :8000 (needs a working LLM key)   | make dev-backend-demo = no key, stand-in model
+make web-install && make dev-web # UI on :5173 (proxies /api to :8000; override with VITE_API_TARGET)
+make test && make test-web
+.venv/bin/python scripts/llm_check.py [--models]          # verify the configured LLM works
+.venv/bin/python scripts/chat_cli.py <trip_id> "question"  # chat from the terminal
+.venv/bin/python scripts/compare_modes.py <trip_id> [--yes] # single vs multi agent; needs --yes for a real LLM
+.venv/bin/python scripts/reindex.py                        # re-ingest docs after chunking/embedding changes
+.venv/bin/python scripts/mcp_call.py [tool '{json}']       # poke the MCP tools
+cd e2e && BASE_URL=http://localhost:5180 node shots.mjs    # drive the real UI in Chrome, save screenshots
 ```
+Web/e2e commands need **Node 22**: `export PATH=$HOME/.nvm/versions/node/v22.22.2/bin:$PATH` (the Makefile does this). Python is `.venv` at the repo root.
 
-## Decisions (made, don't relitigate)
+---
+
+## 2. Working agreements (read before acting)
+
+- **Plan first for big changes.** The user asked to see a plan before implementation for multi-agent; keep doing that for anything large. Ask only when the decision is really theirs.
+- **Never read, print or commit `.env`** (holds the user's API keys). Tell the user which line to edit instead.
+- **The user runs their own backend/UI on :8000 and :5173** (long-running, with their real key and data in `data/`). Do NOT start servers on those ports or hit them. For your own testing use **backend :8010, vite :5180** (`VITE_API_TARGET=http://localhost:8010`), `TRIPMATE_DATA_DIR=/tmp/...`, and `LLM_PROVIDER=demo` unless the task is the real model. Before any script that calls an LLM, check which backend it targets (an earlier run accidentally used the user's key via :8000). Stop only processes you started.
+- **Don't delete or rewrite the user's data or files** (`data/`, their `.git`, etc.). Known leftover to mention, not remove: test trip `291114cf6409` in `data/tripmate.db`.
+- **Be exact about what is verified.** Say what ran live vs. only against mocks/fakes. Don't claim a file or change exists unless it was written (this slipped twice).
+- Token economy: the user is cost-aware. Prefer short commands/outputs; suggest the user run long downloads themselves with `! <cmd>`.
+- Commit at phase ends and sensible steps; commit messages end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Don't commit unless asked or it is a phase boundary the user expects.
+- Tests: add tests with each feature. Test fixtures pin `LIVE_MODE=mock`, `EMBEDDINGS=hash`, `AGENT_MODE=single` regardless of `.env`; multi mode tests pass `agentMode: "multi"` per request.
+
+---
+
+## 3. Decisions (made, don't relitigate)
+
 | Topic | Choice |
 |---|---|
-| Vector store | Chroma (persistent, `data/chroma`) |
-| Embeddings | `EMBEDDINGS=onnx` (default): Chroma's bundled all-MiniLM-L6-v2, downloads once from AWS S3 to `~/.cache/chroma`. `fastembed` needs huggingface.co (blocked on this network). `hash` = tests only. |
-| LLM | **Gemini (default)** via Google's OpenAI-compatible endpoint, free tier, no card; `LLM_PROVIDER=gemini|openai|anthropic` in `.env`. `openai` covers Groq/OpenRouter/Ollama etc. Claude (Anthropic SDK) kept as an option. Adapters in `backend/app/agent/llm.py`; Anthropic-shaped blocks are the canonical internal format. |
-| API key | `GEMINI_API_KEY` (or the key for the chosen provider) in root `.env` (gitignored). Never read/print/commit it. Check with `scripts/llm_check.py`. |
-| Weather / Places / FX | Open-Meteo / OpenStreetMap (Overpass+Nominatim) / frankfurter.app — no keys |
-| Flights | **Mock provider** behind a provider interface (user-approved). Real AviationStack optional later. |
-| Demo safety | `LIVE_MODE=mock|real`; mock uses recorded fixtures so the demo works offline / without quotas |
-| Test/demo target | **Desktop Chrome** (phone emulation at 375px). iOS/Android real-device install is out of scope for now. |
-| Python | 3.12, root `.venv`, `pip install -e backend[dev]`; no `uv`. Node 20 + pnpm/npm available. |
-| DB | stdlib `sqlite3` with row dicts (no ORM), schema in `backend/app/db.py` |
-| Storage | `data/` (gitignored): `tripmate.db`, `uploads/<docId>/`, `chroma/` |
+| Vector store | Chroma (`data/chroma`). SQLite (`data/tripmate.db`) holds trips/docs/chunks/itinerary/chat; search itself is Chroma only. |
+| Embeddings | `EMBEDDINGS=onnx` (default): Chroma's bundled all-MiniLM-L6-v2, downloads once from AWS S3 to `~/.cache/chroma`. `fastembed` needs huggingface.co (blocked here). `hash` = tests only. |
+| Chunking / confidence | Paragraph chunks <=450 chars. Confidence from cosine score: high >=0.45 (or >=0.35 with a second hit from the same doc), low >=0.25, else none (thresholds in `config.py`; re-tune with eval set in Phase 6). |
+| Agents | `AGENT_MODE=multi` default: deterministic router (no LLM call) -> specialist agents (docs / live / itinerary) with own prompts + tool allowlists -> parallel if >1 intent -> composer merges -> deterministic citation verifier. `single` = original one-agent loop. Per-request override `agentMode`. See `docs/ARCHITECTURE.md`. |
+| LLM | Provider via `.env`: `LLM_PROVIDER=gemini` (default; OpenAI-compatible endpoint; `GEMINI_MODEL=gemini-3.5-flash-lite`) \| `openai` (any OpenAI-compatible server: Groq, llama.cpp, Ollama...) \| `anthropic` \| `demo` (rule-based stand-in, NOT an AI, no key/network, for UI/E2E/demos). Adapters: `backend/app/agent/llm.py` (Anthropic-shaped blocks are the canonical internal format). |
+| Gemini model notes | `gemini-2.5-flash` retired for new users; `gemini-flash-latest` hangs; `gemini-3.8-flash` 503 "high demand"; `gemini-3.1-flash-lite` weak at tools; `gemini-3.5-flash` ok but 20-44 s/question; `gemini-3.5-flash-lite` ~7 s/question and correct on 2/2 flows checked. `reasoning_effort=low` is sent for Gemini. |
+| Live data | `LIVE_MODE=mock` default (fixtures; flight JL44 delayed 35 min; Tokyo places). `real`: Open-Meteo weather, Frankfurter FX, Nominatim places (no ratings/hours/diet filter). Flights have no real provider (mock only, user-approved): `LIVE_FLIGHTS=mock` (default) keeps flights mock even when `LIVE_MODE=real`. Real mode checked live 2026-11-11: weather, FX and places work (places have no ratings/hours/diet data). |
+| Guardrails | Citation or low-confidence banner; verify badge for visa/medication/customs/currency; 6 tools/turn; 30 external calls/conversation; backend injects `trip_id`; sensitive values (passport/booking ref/card) masked in API and redacted before reaching the model; raw value only via reveal endpoint. |
+| Privacy caveat | Hosted free tiers may retain prompts: use only the fake `samples/` data. A local model keeps everything on the machine. |
+| UI | React 19 + Vite 8 + Tailwind 4 + TanStack Query + React Router (no zustand/Leaflet/Dexie yet). Target: desktop Chrome with 375 px phone emulation. Map screen cut (stretch). |
+| Tooling | Python 3.12 + pip (no uv). Node 22 for web (`web/.nvmrc`; Vite 8/Vitest 5 fail on Node 20.15). Test env happy-dom. |
 
-## Phases and status
-- [x] **Phase 0 – Scaffold**: git init, folders, Makefile, `.env.example`, README, docs moved.
-- [x] **Phase 1 – Backend core** (commit 46fa205): trips + itinerary CRUD (conflict detection, `source=agent`), document upload + background ingestion (parse → chunk → classify → key facts → masking → Chroma), reveal endpoint (DOC-06), chunk/Source Drawer endpoint. 7 tests passing (`make test`).
-- [x] **Phase 2 – RAG, confidence, agent** (code + tests done with a scripted fake Claude; **live Claude run still pending: the key in `.env` returned 401 invalid x-api-key on 2026-11-10**. Original note: Build the agent on `app/mcp_client.py`: `McpToolClient().list_tools()` already returns Anthropic tool format; inject `trip_id` into tool args server-side. Samples already exist in `samples/`.)
-  - `samples/` documents (hotel confirmation w/ check-out + breakfast, flight itinerary, Japan medication rules).
-  - `search_docs` + confidence level (high/low/none from top score + agreement); thresholds tuned later with eval set.
-  - Agent loop with Claude tool use: max 6 tools/turn, 30 external calls/session; SSE `POST /api/trips/{id}/chat` emitting the `ChatEvent` types in spec §5.2 (token, tool_start, tool_result, citation, confidence, verify, itinerary_updated, error, done); persist conversations/messages.
-  - Guardrails per spec §7.2: citation or low-confidence; verify event for visa/medication/customs/currency; "I couldn't find it" + official-source suggestion.
-  - Exit: demo flows 1 (check-out/breakfast) and 3 (medication + verify badge) work via curl; tests use a fake Claude client.
-- [x] **Phase 3 – MCP server + live tools** (done before Phase 2; no dependency on the agent loop. `search_docs` returns raw scores; the confidence level is added in Phase 2.)
-  - MCP server in `mcp-server/` exposing `search_docs`, `read_itinerary`, `write_itinerary` (sets `source=agent`), `get_flight_status`, `get_weather`, `search_places`, `convert_currency`; backend uses an MCP client.
-  - `api_cache` TTL caching, last-updated timestamps, mock/real providers, `GET /api/trips/{id}/places`, `GET /api/trips/{id}/status` (integration health), undo support for agent writes.
-  - Exit: flows 2, 4, 5 work via curl.
-- [x] **Phase 4 – PWA front end** (`web/`; built + visually verified in Chrome at 375px; offline/install is Phase 5): 375px phone-first. Screens: Trips/Create, Docs (status, masked fact cards, 30s reveal), Chat (streaming, citation chips, Source Drawer, tool cards, low-confidence + verify banners, quick actions, stop/retry), Itinerary (timeline opening on today, bottom-sheet edit, conflict warning, "Added by TripMate" badge + 10s Undo toast), Settings (integration status, units/currency, privacy note). Map is a stretch goal (first thing cut).
-- [ ] **Phase 5 – Offline + PWA**: manifest/icons/installable, service worker app shell, Dexie caches (itinerary, masked docs + chunks for keyword search, last 100 chat msgs, last live responses labeled stale). Offline write queue only if time allows (second cut).
-- [ ] **Phase 6 – Hardening + demo-ready**: Playwright E2E for the 5 flows at phone viewport (mock mode, plus real where possible); eval set + runner and threshold tuning; a11y pass (44px targets, live region, reduced motion, dark mode after 8PM/system); `make seed`/`make demo` reset; demo script + README; short recorded walkthrough.
+### Network constraints (this machine)
+| Blocked (403) | Reachable |
+|---|---|
+| huggingface.co, hf-mirror.com, ollama.com, registry.ollama.ai, lmstudio.ai, openrouter.ai, storage.googleapis.com, corporate npm Artifactory login expired | PyPI, registry.npmjs.org (web/ and e2e/ use a project `.npmrc` for it), AWS S3 (Chroma model), **ModelScope (modelscope.cn)**, Homebrew formulae API, GitHub web/releases (ghcr.io needs token; unverified), Gemini API, Groq, Google AI Studio, NVIDIA NIM, DashScope, Open-Meteo, Nominatim, Frankfurter. Overpass unreachable. |
 
-## Definition of done
-- 5 flows (spec §9) pass E2E.
-- Installable and app shell works in airplane mode.
-- Every factual answer has a citation or low-confidence banner.
-- Agent writes are badged and undoable.
-- `make dev` runs everything from a fresh clone with only the Anthropic key set.
+---
 
-## Scope cuts (in order) and never-cut
-Cut order: map → offline writes → simplified Docs screen → simplified Source Drawer.
-Never cut: citations, confidence/verify behavior, itinerary agent writes with undo, the five demo flows.
+## 4. Phases and status
 
-## Risks
-PDF parsing quality (samples are mostly text); confidence thresholds need eval tuning; first fastembed run downloads a model (needs network once); PWA install requires localhost or HTTPS (localhost is fine for desktop Chrome).
+- [x] **Phase 0 - Scaffold.**
+- [x] **Phase 1 - Backend core:** trips + itinerary CRUD (conflicts, `source=agent`), document upload + background ingestion, masking, reveal and chunk (Source Drawer) endpoints.
+- [x] **Phase 2 - RAG, confidence, agent:** `search_docs` + confidence, SSE chat (`POST /api/trips/{id}/chat`), events per spec 5.2 (+`undoId`), guardrails, history, preferences (units/currency/language) in the prompt. Proven live with Gemini: all of flows 1-5 and a not-in-docs question on `gemini-3.5-flash`; only flows 1-2 on the current default `gemini-3.5-flash-lite` (the rest were not re-run because of the 402 above, which has since cleared).
+- [x] **Phase 3 - MCP server + live tools:** `mcp-server/` (stdio, 7 tools), TTL cache, mock/real providers, undo, `/places`, `/status`.
+- [x] **Phase 4 - PWA UI:** screens, streaming chat, citation chips + Source Drawer, tool cards, banners, undo toast, itinerary, docs, settings, dark mode, a11y basics. Visually verified in Chrome at 375 px.
+- [x] **Phase 4b - Multi-agent mode (default):** `agent/router.py`, `agent/prompt.py` roles, `agent/verify.py`, `agent/loop.py` (`run_agent` + `Turn`), events `agent_start/agent_end/verified`, UI agent headers + "N sources checked", `scripts/compare_modes.py`, `docs/ARCHITECTURE.md`. Deviations from the approved plan: rules-only router (unmatched -> docs agent); live agent also has read-only `search_docs`. A fair single-vs-multi comparison on a real LLM is **still to do** (Gemini key works now; budget ~40 requests, run against your own backend on :8010 with `--yes`).
 
-## Working conventions
-- Commit at the end of each phase (and sensible sub-steps). Commits end with: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`.
-- Tests: `make test` (backend). Add tests with each feature; use fake Claude client + `EMBEDDINGS=hash` so tests need no network or key.
-- Keep logs free of raw document text; sensitive values only leave the server via the reveal endpoint.
+- [x] **Phase 4d - LLM rate-limit handling (done 2026-11-10):** `backend/app/agent/ratelimit.py` + adapter changes in `agent/llm.py`. One process-wide sliding-window limiter per model (`reserve()` is synchronous, so parallel specialists can't race for a slot) queues requests instead of letting them 429; waits are surfaced as a new `waiting` SSE event (`seconds`, `reason` = `rate_limit`|`retry`, optional `agent`) that the UI shows as an amber banner until the next progress event. Waits longer than `LLM_MAX_WAIT_SECONDS` (65) fail fast with a retryable error. 429 handling: honours `Retry-After` / Gemini `retryDelay` (up to 2 retries, only while no output has started), tells a per-day exhaustion (`PerDay`) from a per-minute one and stops with a message naming the Pacific-midnight reset; 5xx/connection errors retry once; SDK retries disabled (`max_retries=0`) so every request is counted and visible. Daily budget persisted in `llm_usage` (per provider+model, day in `LLM_QUOTA_TZ`=America/Los_Angeles), checked before each request. Defaults for Gemini: 12 req/min (free tier allows 15) and 500/day; `LLM_MAX_RPM` / `LLM_DAILY_LIMIT` override (-1 = provider default, 0 = unlimited; non-Gemini providers are unlimited unless set). `done` carries `quota {used, limit}` (UI note at >=90%); `GET /api/trips/{id}/status` has `llm_limits`; Settings shows "N of 500 used today"; `scripts/chat_cli.py` prints `[waiting]` and daily usage. Verified live on Gemini with `LLM_MAX_RPM=3`: a question waited 37 s then answered; counter 5 -> 8. Caveats: the daily counter only counts requests made through this app's database (other tools using the same key are invisible); with the real default of 12/min a 5-request compound question can wait up to about a minute.
 
-## Decisions/Notes log
-- 2026-11-10 **Multi-agent mode added and made the default** (`AGENT_MODE=multi`; `single` kept, per-request `agentMode` override). Design in `docs/ARCHITECTURE.md`: deterministic router (`agent/router.py`, no LLM call) -> specialist agents (docs / live / itinerary; own prompts + tool allowlists in `agent/prompt.py`, allowlist enforced in `run_agent`) -> run in parallel when >1 intent -> composer LLM call merges (only for compound questions; a single specialist answers directly, so the common case costs the same LLM calls as single mode) -> deterministic citation verifier (`agent/verify.py`: claim text before each [n] must be covered by that passage or live tool results; numbers/times normalised, must match). New events: `agent_start`, `agent_end`, `verified`; `tool_*` carry `agent`; `done` carries `agentMode`, `llmCalls`, `toolCalls`. UI groups tool cards under agent headers and shows "N sources checked". Loop refactored into `run_agent` + `Turn` shared by both modes. Deviations from the approved plan: router is rules-only (no LLM fallback; unmatched -> docs agent); live agent also gets read-only `search_docs` to resolve "my flight/hotel". Backend test suite runs in single mode by default (conftest) so it doubles as the single-mode regression suite; `tests/test_multi.py` + multi cases in `test_demo_llm.py` cover multi. 75 backend + 15 web tests.
-  - First live comparison (Gemini 3.5 flash-lite, 7 questions, partly rate-limited): multi cost the same LLM calls as single for single-intent questions, more for compound ones (6 vs 2); verifier initially dropped valid citations on a sentence with two facts and could not equate 6:35 PM with 18:35: fixed (per-claim attribution + time normalisation), regression tests use the recorded real answers. Re-run `scripts/compare_modes.py` once the Gemini key has quota.
-  - Incident: my first comparison run hit the user's own backend on :8000 (real Gemini key, ~14 requests) because my demo server could not bind; it also left a trip `291114cf6409` ("Tokyo Dec 2026", 4 docs) in `data/tripmate.db`. `compare_modes.py` now prints the target and refuses a non-demo LLM without `--yes`; `vite.config.ts` honours `VITE_API_TARGET`; always test on other ports (8010/5180).
-- 2026-11-10 Default Gemini model is now `gemini-3.5-flash-lite` (user request; better rate limits). Live test: check-out/breakfast and flight-delay flows were correct, cited and ~7 s each (vs 25-44 s for 3.5-flash); the remaining flows (medication, places, itinerary add, not-found) were NOT verified because the key's Google project then returned **402 "prepayment credits are depleted"** for every model (the project is on prepaid billing, not free tier). Needs a top-up or a key from a free-tier project, then re-run the 6 questions. 402 now maps to a clear user-facing message.
-- 2026-11-10 **Phase 4 built** (`web/`, React 19 + Vite 8 + Tailwind 4 + TanStack Query + React Router; no zustand/Leaflet): trips list/create, tab layout (Chat, Itinerary, Docs, Settings), SSE chat client (`lib/sse.ts` parser, `lib/chatReducer.ts` pure event folding, `lib/useChat.ts`), streaming answers with citation chips -> Source Drawer, collapsed tool cards, low-confidence + verify banners, stop/retry, quick actions, suggested prompts from the trip's docs, undo toast (10 s), itinerary timeline opening on today with bottom-sheet CRUD / conflict warning / "Added by TripMate" badge, docs with status polling + masked fact cards + 30 s reveal, settings (integration status, units/currency/language/theme, privacy note), dark mode after 8 PM or system dark, aria-live announces each finished answer once. 14 vitest tests; `e2e/shots.mjs` drives the real UI via system Chrome and saves screenshots. Map screen NOT built (stretch, first cut).
-  - Env gotchas: web needs **Node 22** (`web/.nvmrc`; Vite 8/Vitest 5 fail on 20.15). `web/.npmrc` and `e2e/.npmrc` point at registry.npmjs.org because the corporate Artifactory login expired. npm bug: lockfile missed the macOS arm64 rolldown binding, so `@rolldown/binding-darwin-arm64` is an optional dependency. Test env is happy-dom (jsdom 31 needs newer Node).
-  - Backend additions: `preferences` (units/currency/language, validated) in the chat body -> system prompt; `LLM_PROVIDER=demo` (`app/agent/demo_llm.py`): deterministic rule-based stand-in, NOT an AI, so UI/E2E/demos need no key, network or rate limit. Use it for Phase 6 E2E. Fixed Breakfast fact truncation.
-- 2026-11-10 **Live Gemini run** (gemini-3.5-flash, reasoning_effort=low, real onnx embeddings, samples uploaded): flows 1-5 and a not-in-docs question all worked with correct answers, citations, verify badge, undo id. Findings: `gemini-2.5-flash` is retired for new users (404 "no longer available"), `gemini-flash-latest` hangs, `gemini-3.8-flash` returned 503 high demand, `gemini-3.1-flash-lite` is faster per call but missed the flight number and the places search (worse tool use), so default = `gemini-3.5-flash`. Latency is 20-44 s per question: backend/tools are fast (MCP spawn 1.6 s, search_docs 0.03-0.3 s); the time is Gemini free-tier latency (4-8 s per call x 2-4 calls) plus occasional 429/503 retries. Free-tier rate limit (429) was hit after ~25 requests. Mitigations to consider in Phase 4/6: show tool-progress cards immediately (already streamed), fewer round trips (prompt nudged), pre-recorded/cached demo answers, or a paid/other provider. Fixed: mock places ignored generic query words ("vegetarian restaurant" returned 0); itinerary writes no longer emit a confidence banner; 60 s request timeout.
-- 2026-11-10: the Anthropic key in `.env` was rejected (401 invalid x-api-key) and the user has no working Claude key, so the default LLM is now Gemini (free tier). `OpenAICompatLLM` streams chat completions, accumulates tool calls (name = start of a new call; handles missing ids/indexes), echoes `extra_content` (Gemini thought signatures) back, sanitizes tool schemas (Gemini rejects `anyOf` null/`title`/`default`), maps errors to user-facing `LLMError`. **Not yet run against live Gemini** (no key yet); tested with a mock streaming server (14 tests). Free-tier caveat: prompts may be retained/trained on, so use only fake sample data. Default model `gemini-2.5-flash` may need changing; run `scripts/llm_check.py --models`.
-- 2026-11-10 Phase 2 built: chunking is now paragraph-level (max 450 chars) with `scripts/reindex.py` to re-ingest existing docs; `app/confidence.py` (thresholds in config: high 0.45, agree 0.35, low 0.25, calibrated on samples; irrelevant queries scored <=0.14, relevant >=0.43) and `search_docs` now returns `confidence` plus only passages >= conf_low; `app/agent/` (`loop.py`, `llm.py`, `hub.py` long-lived MCP subprocess, `guardrails.py`, `prompt.py`); `POST /api/trips/{id}/chat` (SSE) and `GET /api/trips/{id}/conversations/{cid}/messages`. Backend injects `trip_id` into tools (hidden from the model), numbers passages as [n], emits citation events only for markers the model used, downgrades confidence to low when nothing is cited, emits verify for visa/medication/customs/currency, caps 6 tools/turn and 30 external calls/conversation (table `usage`). Spec deviation: `itinerary_updated` event also carries `undoId` (needed for the Undo toast). `scripts/chat_cli.py` is a terminal chat client. 37 tests (fake LLM in `tests/fakes.py`).
-- Tests are pinned to mock mode and hash embeddings regardless of `.env`.
-- 2026-11-10: bug: relative `TRIPMATE_DATA_DIR=./data` resolved against cwd, so backend (cwd `backend/`) and scripts (repo root) used different DBs. Now anchored to repo root. Also `search_docs` and the chunk endpoint now redact sensitive values (passport/booking ref/card) before text reaches the model or browser; Phase 2 must keep sending only redacted text to Claude.
-- 2026-11-09 Phase 3 built: `app/tools/` (flights mock-only, weather Open-Meteo, places mock fixtures / Nominatim, fx Frankfurter, TTL `api_cache` with stale-on-failure), `app/services/itinerary.py` (shared by REST and tools; `agent_write` sets source=agent and logs undo), `POST /api/trips/{id}/undo/{undoId}`, `GET /api/trips/{id}/places`, `GET /api/trips/{id}/status`, `mcp-server/tripmate_mcp/server.py` (FastMCP stdio, 7 tools; pinned `mcp<2`), `app/mcp_client.py` (forwards only TRIPMATE_DATA_DIR/LIVE_MODE/EMBEDDINGS env to the subprocess, never the API key). Real mode verified for weather + fx; real places is Nominatim only (no ratings/hours/diet filter; Overpass is unreachable here). Mock flight JL44 is delayed 35 min (demo flow 2). 17 tests.
-- 2026-11-09: huggingface.co and GCS return 403 on this network, so fastembed ingestion failed (`Could not load model ... from any source`). Switched default to Chroma ONNX MiniLM (S3 reachable). Existing `.env` files must set `EMBEDDINGS=onnx`.
-- 2026-11-09: added `samples/` docs; fixed booking-reference masking regex bug found by uploading them.
-- Repo moved to `/Users/A-7878/Learning/trip-mate`. Remote `origin` = github.com/nitbaby/trip-mate; first push failed with 403 'account suspended' (unresolved).
+### Phase 4c - Local open-weight model (done 2026-11-11)
+**Result:** the app runs end to end in multi mode on **Qwen3-8B Q4_K_M** via llama.cpp (`make local-model`, `make local-llm`, four `.env` lines: see README "Run with a local model"). Roughly 6-20 s per answer on the M1 Pro 16 GB; no key, no rate limit, nothing leaves the machine. Qwen2.5-7B was tried first and is clearly worse (wrong values, skipped searches, claimed writes it never made). Gemini `gemini-3.5-flash-lite` is still faster (3-5 s) and cites more cleanly. Not tried: Llama 3.2/3.1, Gemma 3 (Gemma has no native tool format), nomic-embed-text (see feasibility discussion: low value, MiniLM is fine; Ollama is unreachable here, llama-server already serves the OpenAI API).
+Environment gotchas on this machine: `brew install` failed with "user nbaby doesn't exist" because the shell had a stale `$USER` (use `USER=<real login> brew ...`); `modelscope` needs a CA bundle (system certs + company root cert) via `make local-model CA_BUNDLE=...`.
+Six demo questions on Qwen3-8B (own backend :8010, mock live data): check-out/breakfast correct (but may show confidence `low` when the cited chunk is the wrong one: honest), delayed flight correct, medication correct with verify badge, vegetarian places finds the hotel then mock places returns 0, add dinner now works, not-in-docs refuses correctly.
+`compare_modes.py` on Qwen3-8B (7 questions, one run each): single 115 s / 12 LLM calls / 2 citations / 0 dropped; multi 123 s / 12 calls / 7 citations / 2 dropped by the verifier. Single mode answered the medication question with **no document search at all** (from memory): multi is the safe default for small models.
+App-side changes this phase (all tested): deterministic prefetch before the model's first turn (`search_docs` for docs questions and live "my ..." questions; `read_itinerary` for plan questions); explicit "add/schedule ..." requests force `write_itinerary` as the first step (`tool_choice=required`, only that tool offered with create fields required); "NOT changed" note when an answer claims an itinerary change that did not happen; same-document sibling chunks returned slightly below `conf_low` (`conf_sibling_margin`); every agent gets the traveler's itinerary in its prompt (marked as not a document, never cited) and plan wordings route to the itinerary agent; live-data answers without citations show no document-confidence badge; `LIVE_FLIGHTS` setting; `LLM_TIMEOUT_SECONDS`.
+
+(Original plan below.)
+Goal: the app works end-to-end with **no cloud LLM** (no key, no rate limits, no data leaving the machine), in multi mode, on the user's M1 Pro 16 GB.
+
+Why: Gemini key has no credits; free tiers are slow/limited; local model fixes privacy and quota. The OpenAI-compatible adapter already supports it (`LLM_PROVIDER=openai`), so most work is install + verification + tuning.
+
+Chosen runtime/model (from the reachability checks on 2026-11-10; **download/serve steps below are NOT yet executed or verified**):
+- Runtime: **llama.cpp** (`llama-server`). `brew install llama.cpp` (formula v0.9.0, arm64 bottle exists; bottle download from ghcr.io is untested here). Alternative Ollama is a worse fit (registry blocked; GGUF import needs a hand-written Modelfile chat template for tools; cannot import split shards).
+- Weights: from **ModelScope** (HF blocked). Primary: `Qwen/Qwen2.5-7B-Instruct-GGUF`, Q4_K_M = 2 shards (`qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf` 3.99 GB + `-00002-of-00002.gguf` 0.69 GB). Shard URL pattern `https://modelscope.cn/models/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/master/<file>` returned 200 for shard 1. A guessed unsharded name returns 404.
+- Fallbacks if quality is too weak: `Qwen/Qwen3-8B-GGUF` (`Qwen3-8B-Q4_K_M.gguf`, 5.03 GB single file; has a thinking mode that slows answers: disable it) or `Qwen/Qwen2.5-14B-Instruct-GGUF` (Q4_K_M 3 shards, ~9 GB: tight on 16 GB RAM). `Qwen2.5-3B-Instruct-GGUF` exists but is weak at tool use.
+- Disk: 96 GB free. Model dir `models/` (now in `.gitignore`).
+
+Steps
+1. `brew install llama.cpp` (user can run with `! brew install llama.cpp`). Confirm `llama-server --version`.
+2. Add `modelscope` as an optional extra in `backend/pyproject.toml` (`local = ["modelscope"]`); currently only pip-installed ad hoc in `.venv`. Add `make local-model` target that runs:
+   `.venv/bin/modelscope download --model Qwen/Qwen2.5-7B-Instruct-GGUF --include "qwen2.5-7b-instruct-q4_k_m*.gguf" --local_dir models/qwen2.5-7b` (the `--include` and `--local_dir` flags exist in the installed CLI). ~4.7 GB; let the user run it or run it in the background.
+3. Add `make local-llm` target: `llama-server -m models/qwen2.5-7b/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf --alias qwen2.5-7b --jinja -c 8192 -ngl 99 --port 8080` (`--jinja` is required for tool calling; point `-m` at shard 1 with both shards in one dir). Check `curl localhost:8080/v1/models`.
+4. Configure `.env` (the **user** edits it; do not read it): `LLM_PROVIDER=openai`, `LLM_BASE_URL=http://localhost:8080/v1`, `LLM_MODEL=qwen2.5-7b`, `LLM_API_KEY=local`. Verify with `scripts/llm_check.py`.
+5. Verify tool calling through the adapter against llama-server (streamed `tool_calls` shapes differ per server): run the six questions (check-out+breakfast, 6 PM flight delayed, medication rules + verify badge, vegetarian places open now, add dinner 8 PM tomorrow, not-in-documents question) via `scripts/chat_cli.py` on **your own backend :8010** with real onnx embeddings and the `samples/` documents. Fix adapter issues found (argument streaming, missing ids, `finish_reason`).
+6. Likely code changes (do only if the checks show a need): make the LLM request timeout configurable (`LLM_TIMEOUT`, currently 60 s read timeout in `OpenAICompatLLM`: a slow local first token may exceed it); don't send `temperature`/`reasoning_effort` if the server rejects them; tighten specialist prompts for a small model; consider per-role models (e.g. local for specialists, a stronger model only for the composer) as an optional follow-up.
+7. Run `scripts/compare_modes.py <trip> --yes` (single vs multi on the local model; no API quota involved) and record LLM calls, seconds, citations kept/dropped, errors.
+8. Update README (local model section), `.env.example`, this file, add an adapter test for any quirk found. Commit.
+
+Exit criteria: the six questions give correct answers with working citations in **multi mode** on the local model; seconds per question recorded; if unusable, switch to a fallback model and record why; fresh-clone instructions (`make local-model`, `make local-llm`, three `.env` lines) work.
+
+Risks: Homebrew/ghcr download may fail on this network; split-GGUF loading; 7B tool-calling reliability and citation discipline (verifier + multi mode help); latency on 16 GB; RAM pressure with Chrome + backend + model (7B Q4 needs about 5 GB).
+
+### Phase 5 - Offline + installable PWA (after 4c, or before if the user prefers)
+Manifest + icons, service worker app shell (vite-plugin-pwa), Dexie caches (itinerary, masked docs + chunks for keyword search, last 100 chat messages, last live responses labelled stale), offline banner. Offline write queue only if time allows (second cut). Settings "Offline storage" section currently says "not enabled yet". Install requires localhost or HTTPS (localhost fine for desktop Chrome).
+
+### Phase 6 - Hardening + demo-ready
+Playwright E2E (`e2e/`, system Chrome via `channel: "chrome"`, phone viewport) for the 5 flows using `LLM_PROVIDER=demo`; eval set (30-50 questions) + runner and confidence-threshold tuning; a11y pass; `make seed` / `make demo` reset (+ serve built web from the backend or `vite preview`); demo script, README, short recorded walkthrough. Also: re-run live Gemini checks when credits exist; real-vs-mock live data check; remove the stray test trip if the user wants.
+
+### Backlog / open items
+- **Gemini is unblocked:** re-run the 6 demo questions on `gemini-3.5-flash-lite` (own backend :8010, real onnx embeddings, `samples/`), then `compare_modes.py --yes`. Confirm tool use on the lite model for medication, places, itinerary add and not-found (not yet seen).
+- ~~Rate-limit handling~~ **DONE** (see Phase 4d below). Still to verify in a browser: the amber "Waiting for the assistant's rate limit" banner in the chat UI (covered by reducer tests and a live CLI run, not yet screenshotted).
+- Push to GitHub once the account issue is resolved.
+- Map screen (stretch, cut), real flight provider (optional), LLM-based verifier layer (optional), router LLM fallback (optional).
+
+---
+
+## 5. Definition of done
+- 5 demo flows (spec 9) pass end to end, in the UI, in multi mode (E2E on the demo provider; manual on a real or local LLM).
+- Installable; app shell works in airplane mode.
+- Every factual answer has a grounded citation or a low-confidence banner; agent writes are badged and undoable.
+- Fresh clone runs with `make setup` + one LLM option (Gemini key, or local model via `make local-model`/`make local-llm`, or the demo provider).
+
+Scope cuts, in order: map -> offline writes -> simplified Docs screen -> simplified Source Drawer. Never cut: citations, confidence/verify behaviour, itinerary agent writes with undo, the five demo flows.
+
+---
+
+## 6. Notes log (non-obvious learnings only)
+- **Schema sanitizer bug (fixed):** `sanitize_schema` dropped every key named `title`, including a tool *parameter* named `title`, so no OpenAI-compatible model (Gemini too) could ever see `write_itinerary.title`. Parameters live under `properties`: only schema-level titles may be stripped.
+- **Gemini 3 needs a thought signature on every function call in the history.** A tool call the app injects itself (the prefetch) gets the documented dummy `skip_thought_signature_validator` (Gemini only; the internal `synthetic` flag is stripped for Anthropic). Without it every following request is a 400.
+- **Chat history poisons small models:** the last 20 messages go to the model, and Qwen copied its own earlier "not found" replies even when the data was now available. Prefetching the lookup and labelling the itinerary block as "read fresh, overrides earlier replies" fixes it. A new conversation also avoids it.
+- Itinerary reads go through the MCP tool server, not the HTTP API, so they never appear in the backend access log. `read_itinerary` with a date-only `date_to` used to exclude that whole day (string compare): fixed.
+- llama-server: a *named* `tool_choice` is not enforced; `tool_choice=required` with a single offered tool is. `--chat-template-kwargs '{"enable_thinking":false}'` turns Qwen3 thinking off.
+- Docs/tools for testing and demos (2026-11-11): `docs/MANUAL_TEST_PLAN.md` (REST, MCP, RAG, Agent, UI), `docs/DEMO_PLAN.md` (scripted demo), `scripts/inspect_rag.py` (read-only HTML report of the Chroma store: chunks, embedding map, query scoring; masks sensitive values), `scripts/demo_seed.py` (trip + sample docs on a backend). The manual plan's expected results were written from code and earlier runs; only R-10, R-24 and the tool list were re-checked by hand on 2026-11-11.
+- `scripts/debug_itinerary.py <trip_id>` prints what the agents see for a trip (read-only, no secrets). Reading `data/tripmate.db` for diagnosis: open with `mode=ro` or copy it to the scratchpad; never modify it.
+- Multi-agent first live data (Gemini 3.5 flash-lite): single-intent questions cost the same LLM calls as single mode; compound ones cost more (6 vs 2). The citation verifier first rejected valid citations (a sentence with two facts; "6:35 PM" vs "18:35"): fixed with per-claim attribution and time normalisation; recorded real answers are regression tests (`tests/test_multi.py`).
+- Relative `TRIPMATE_DATA_DIR=./data` once resolved against the cwd (backend vs scripts used different DBs): now anchored to the repo root.
+- npm: web needs Node 22; `web/.npmrc` + `e2e/.npmrc` point to registry.npmjs.org; `@rolldown/binding-darwin-arm64` is an explicit optional dependency (npm optional-dependency lockfile bug); jsdom 31 needs a newer Node, so tests use happy-dom.
+- Gemini via the OpenAI-compatible endpoint: tool schemas must drop `anyOf`-null/`title`/`default`; thought-signature `extra_content` must be echoed back; `reasoning_effort=low` keeps replies fast and inside `max_tokens`; 429 = rate limit; a 402 "prepayment credits are depleted" was seen once on 2026-11-10 for every model and later cleared: treat it as a billing/quota state to ask the user about, not as a code bug.
+- Retrieval scores with MiniLM: relevant queries 0.43-0.83, irrelevant <=0.14 on the samples (hence the thresholds). The test-only hash embedder scores long natural-language queries lower, so demo/test assertions on confidence allow high or low.
+- Mock places ignore generic query words ("vegetarian restaurant"); itinerary writes skip the confidence banner (spec 3.3); `itinerary_updated` carries `undoId`.
+- Incident log: (1) a comparison run once hit the user's own backend on :8000 using their Gemini key and left a test trip in their DB: hence the agreements above and the `--yes` guard in `compare_modes.py`. (2) Twice a file/change was claimed that did not exist (`docs/ARCHITECTURE.md`, `models/` in `.gitignore`): verify before claiming.

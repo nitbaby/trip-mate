@@ -15,15 +15,21 @@ import anthropic
 
 from ..config import get_settings
 from ..db import connect, new_id, now_iso
+from ..services.itinerary import list_items
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
-from .router import AGENTS, route
+from .ratelimit import quota_status
+from .router import ADD_REQUEST, AGENTS, route
 from .verify import verify_citations
 
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
 HISTORY_LIMIT = 20
+# an answer that says the itinerary was changed, checked against whether a write really succeeded
+CHANGE_CLAIM = re.compile(r"\b(?:I(?:'ve|'ve| have)?\s+(?:added|scheduled|booked|removed|deleted|moved|updated|created)|"
+                          r"(?:has|have) been (?:added|scheduled|booked|removed|deleted|moved|updated)|"
+                          r"(?:added|scheduled|booked) (?:a |an |the )?\w*[^.\n]{0,40}(?:to|on|in) your (?:itinerary|schedule))", re.IGNORECASE)
 RANK = {"none": 0, "low": 1, "high": 2}
 
 
@@ -89,17 +95,25 @@ class Turn:
     tools: list[dict]
     with_trip: set[str]
     prefs: dict | None = None
+    itinerary: list[dict] | None = None                        # the traveler's items, shown to every agent
     refs: dict[int, dict] = field(default_factory=dict)       # [n] -> citation target + passage text (server side only)
     evidence: list[str] = field(default_factory=list)         # live tool results, used by the verifier
     conf_levels: list[str] = field(default_factory=list)
     tool_count: int = 0
     llm_calls: int = 0
     wrote_itinerary: bool = False
+    failed_write: str = ""                                      # error text of a write_itinerary call that failed (and was not retried OK)
     streamed: str = ""                                          # everything streamed to the user as tokens
 
 
+async def _none():
+    return
+    yield  # an empty async generator
+
+
 async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed: set[str] | None, messages: list[dict],
-                    stream_text: bool, out: dict, max_iter: int = MAX_ITERATIONS) -> AsyncIterator[dict]:
+                    stream_text: bool, out: dict, max_iter: int = MAX_ITERATIONS,
+                    prefetch: tuple[str, dict] | None = None, force_first_tool: str | None = None) -> AsyncIterator[dict]:
     """Run one agent to completion. Yields events; the agent's answer is left in out["text"]."""
     s = get_settings()
     tag = {"agent": agent} if agent else {}
@@ -109,11 +123,22 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
     messages = list(messages)
     accumulated, last_text = "", ""
     exhausted = True
-    for _ in range(max_iter):
+    for it in range(max_iter):
         final, last_text = None, ""
-        turn.llm_calls += 1
-        async for kind, payload in llm.turn(system, tools, messages):
-            if kind == "text":
+        if it == 0 and prefetch and any(t["name"] == prefetch[0] for t in tools):
+            # Small models sometimes skip the lookup, or copy an earlier "not found" reply from the chat history:
+            # make the first lookup deterministically, so a fresh result is always in front of the model.
+            final = {"content": [{"type": "tool_use", "id": f"prefetch_{prefetch[0]}", "name": prefetch[0],
+                                  "input": prefetch[1], "synthetic": True}], "stop_reason": "tool_use"}
+        else:
+            turn.llm_calls += 1
+        forced = {"force_tool": force_first_tool} if it == 0 and force_first_tool and any(t["name"] == force_first_tool for t in tools) else {}
+        # the forced step offers only that tool: servers differ in how strictly they honour a named tool_choice
+        call_tools = [_strict_create(t) for t in tools if t["name"] == force_first_tool] if forced else tools
+        async for kind, payload in (_none() if final else llm.turn(system, call_tools, messages, **forced)):
+            if kind == "wait":  # the adapter is queued for the rate limit or backing off: tell the UI
+                yield {"type": "waiting", **payload, **tag}
+            elif kind == "text":
                 last_text += payload
                 accumulated += payload
                 if stream_text:
@@ -161,7 +186,12 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
                         h.pop(k, None)
             elif ok and name != "write_itinerary":
                 turn.evidence.append(json.dumps(res))
+            if name == "write_itinerary" and not ok:
+                turn.failed_write = (res.get("error") or {}).get("message", "unknown error")
+                res = {**res, "hint": "The itinerary was NOT changed. Call write_itinerary again with every required field "
+                                      "(type, title, start_at), or tell the traveler the change failed. Never say it was added."}
             if ok and name == "write_itinerary":
+                turn.failed_write = ""
                 turn.wrote_itinerary = True
                 yield {"type": "itinerary_updated", "itemId": res["item_id"], "action": res["action"], "undoId": res["undo_id"]}
             yield {"type": "tool_result", "toolCallId": tu["id"], "ok": ok, "summary": summarize(name, args, res), **tag}
@@ -214,9 +244,49 @@ async def _merge(gens: list[AsyncIterator[dict]]) -> AsyncIterator[dict]:
 async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
     out: dict = {}
     msgs = [*history, {"role": "user", "content": user_message}]
-    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs), allowed=None,
-                              messages=msgs, stream_text=True, out=out):
+    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=None,
+                              messages=msgs, stream_text=True, out=out, force_first_tool=_force(None, user_message)):
         yield ev
+
+
+def _itinerary(conn, trip_id: str) -> list[dict] | None:
+    try:
+        return list_items(conn, trip_id)
+    except Exception:  # noqa: BLE001 - context only: never fail a chat turn because of it
+        return None
+
+
+def _strict_create(tool: dict) -> dict:
+    """The forced step is always an 'add': make the create fields required in the schema the model sees, because
+    small models treat the optional-looking title as skippable and put the name in notes."""
+    schema = json.loads(json.dumps(tool["input_schema"]))
+    schema["required"] = ["action", "type", "title", "start_at"]
+    props = schema.get("properties", {})
+    if "action" in props:
+        props["action"] = {"type": "string", "enum": ["create"]}
+    if "title" in props:
+        props["title"] = {"type": "string", "description": 'Short name of the item, e.g. "Dinner"'}
+    if "type" in props:
+        props["type"] = {"type": "string", "enum": ["flight", "hotel", "reservation", "activity", "transit", "note"]}
+    if "start_at" in props:
+        props["start_at"] = {"type": "string", "description": "ISO 8601 local time, e.g. 2026-12-02T20:00:00"}
+    return {**tool, "input_schema": schema}
+
+
+def _force(agent: str | None, message: str) -> str | None:
+    """Small models sometimes say they added something without calling the tool: an explicit 'add ...' request
+    forces the first step to be write_itinerary (the model still fills in the arguments)."""
+    return "write_itinerary" if agent in (None, "itinerary") and ADD_REQUEST.search(message) else None
+
+
+def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
+    """Lookups made before the model's first turn: documents for document questions (and live questions about
+    'my ...'), the itinerary for plan questions (an 'add ...' request skips it: it goes straight to the write)."""
+    if agent == "docs" or (agent == "live" and re.search(r"\bmy\b", message, re.IGNORECASE)):
+        return "search_docs", {"query": message}
+    if agent == "itinerary" and not ADD_REQUEST.search(message):
+        return "read_itinerary", {}
+    return None
 
 
 async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
@@ -224,13 +294,15 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
     msgs = [*history, {"role": "user", "content": user_message}]
     if len(intents) == 1:  # the specialist answers the user directly: no extra composer call
         a = intents[0]
-        async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs),
-                                  allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={}):
+        async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary),
+                                  allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={},
+                                  prefetch=_prefetch(a, user_message), force_first_tool=_force(a, user_message)):
             yield ev
         return
     outs: dict[str, dict] = {a: {} for a in intents}
-    gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs), allowed=AGENTS[a]["tools"],
-                      messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS) for a in intents]
+    gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=AGENTS[a]["tools"],
+                      messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS,
+                      prefetch=_prefetch(a, user_message), force_first_tool=_force(a, user_message)) for a in intents]
     async for ev in _merge(gens):
         yield ev
     findings = "\n\n".join(f"[{AGENTS[a]['label']}]\n{outs[a].get('text', '').strip() or '(no answer)'}" for a in intents)
@@ -239,7 +311,9 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
     final = None
     async for kind, payload in llm.turn(composer_prompt(turn.trip, turn.prefs), [],
                                         [{"role": "user", "content": f"Question: {user_message}\n\nSpecialist answers:\n\n{findings}"}]):
-        if kind == "text":
+        if kind == "wait":
+            yield {"type": "waiting", **payload, "agent": "composer"}
+        elif kind == "text":
             turn.streamed += payload
             yield {"type": "token", "text": payload}
         else:
@@ -264,10 +338,18 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         except Exception:  # noqa: BLE001
             yield {"type": "error", "code": "AGENT_FAILED", "message": "The tool server is unavailable.", "retryable": True}
             return
-        turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs)
+        turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs,
+                    itinerary=_itinerary(conn, trip["id"]))
         answer = _answer_multi if mode == "multi" else _answer_single
         async for ev in answer(turn, llm, history, user_message):
             yield ev
+        claims_change = bool(CHANGE_CLAIM.search(turn.streamed))
+        if not turn.wrote_itinerary and (turn.failed_write or claims_change):
+            note = ("\n\n⚠️ The itinerary was NOT changed: the update failed. Please try again with the day, time and a title."
+                    if turn.failed_write else
+                    "\n\n⚠️ The itinerary was NOT changed: no update was made. Please try again.")
+            turn.streamed += note
+            yield {"type": "token", "text": note}
         full_text = turn.streamed
 
         # citations: only markers the model used that map to a real passage (and, in multi mode, are grounded)
@@ -284,7 +366,8 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         for m in supported:
             r = turn.refs[int(m)]
             yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}
-        if turn.conf_levels and not turn.wrote_itinerary:  # actions skip the confidence check (spec 3.3)
+        live_answer = bool(turn.evidence) and not supported  # answered from live data (shown with its own last-updated time)
+        if turn.conf_levels and not turn.wrote_itinerary and not live_answer:  # actions skip the confidence check (spec 3.3)
             level = max(turn.conf_levels, key=RANK.get)
             if level != "none" and not supported:
                 level = "low"  # CHAT-02: no (grounded) citation means no "high"
@@ -294,7 +377,14 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             yield {"type": "verify", "reason": reason}
         mid = _save(conn, conversation_id, "assistant", full_text)
         saved_assistant = True
-        yield {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
+        done = {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
+        try:
+            quota = quota_status(s)
+        except Exception:  # noqa: BLE001 - a quota read must never break an answer
+            quota = None
+        if quota:
+            done["quota"] = {"used": quota["used"], "limit": quota["limit"]}
+        yield done
     except (LLMError, anthropic.APIError, ValueError, RuntimeError) as e:
         if isinstance(e, LLMError):
             err = {"code": "AGENT_FAILED", "message": e.message, "retryable": e.retryable}

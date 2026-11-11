@@ -37,7 +37,7 @@ def _time(q: str) -> str:
 
 
 class DemoLLM:
-    async def turn(self, system: str, tools: list[dict], messages: list[dict]) -> AsyncIterator[tuple[str, object]]:
+    async def turn(self, system: str, tools: list[dict], messages: list[dict], force_tool: str | None = None) -> AsyncIterator[tuple[str, object]]:
         if "You are the COMPOSER" in system:  # merge specialist answers verbatim (keeps [n] markers)
             body = messages[-1]["content"].split("Specialist answers:\n\n", 1)[-1]
             sections = re.split(r"\n\n(?=\[[A-Z][^\]\n]*\]\n)", body)  # "[Documents agent]\n<answer>" blocks

@@ -39,3 +39,16 @@ def test_agent_source_persisted(client):
     r = client.post(f"/api/trips/{tid}/itinerary", json={
         "type": "reservation", "title": "Dinner", "start_at": "2026-12-02T20:00:00", "source": "agent"})
     assert r.json()["source"] == "agent"
+
+
+def test_date_only_range_includes_the_whole_end_day(client):
+    from app.tools import impl
+    tid = mk(client)
+    base = f"/api/trips/{tid}/itinerary"
+    client.post(base, json={"type": "activity", "title": "Garden", "start_at": "2026-12-01T10:00:00"})
+    client.post(base, json={"type": "activity", "title": "Late", "start_at": "2026-12-01T23:30:00"})
+    client.post(base, json={"type": "activity", "title": "Next day", "start_at": "2026-12-02T09:00:00"})
+    names = lambda a, b: [i["title"] for i in impl.read_itinerary(tid, a, b)["items"]]  # noqa: E731
+    assert names("2026-12-01", "2026-12-01") == ["Garden", "Late"]
+    assert names("2026-12-01T00:00:00", "2026-12-01T12:00:00") == ["Garden"]  # full datetimes still exact
+    assert len(names(None, None)) == 3

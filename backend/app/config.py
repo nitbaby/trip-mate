@@ -21,13 +21,21 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     live_mode: str = "mock"  # mock | real
+    live_flights: str = "mock"  # mock | real: flights have no real provider yet, so LIVE_MODE=real keeps mock flights by default
     embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
     # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6
     conf_high: float = 0.45
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
+    conf_sibling_margin: float = 0.10  # same-document chunks this far below conf_low are still returned
     conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
     agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
+    # Rate limits for the LLM API. -1 = provider default (gemini: 12 requests/min [free tier allows 15], 500/day); 0 = unlimited.
+    llm_timeout_seconds: float = 60.0  # read timeout per LLM request (a slow local model may need more, e.g. 180)
+    llm_max_rpm: int = -1
+    llm_daily_limit: int = -1
+    llm_quota_tz: str = "America/Los_Angeles"   # Google resets daily quotas at midnight Pacific
+    llm_max_wait_seconds: int = 65               # >= one full per-minute window; longer waits fail fast instead of freezing the chat
     max_tools_per_turn: int = 6
     max_external_calls_per_session: int = 30
 

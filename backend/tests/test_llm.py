@@ -23,9 +23,17 @@ def sse(*deltas, finish="stop"):
     return "".join(f"data: {json.dumps(c)}\n\n" for c in out) + "data: [DONE]\n\n"
 
 
-def llm_with(handler, model="gemini-test"):
+SLEPT: list[float] = []
+
+
+async def fake_sleep(seconds):
+    SLEPT.append(seconds)
+
+
+def llm_with(handler, model="gemini-test", **kw):
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return OpenAICompatLLM("test-key", model, "http://mock.local/v1beta/openai/", http_client=client, provider_name="Gemini")
+    return OpenAICompatLLM("test-key", model, "http://mock.local/v1beta/openai/", http_client=client, provider_name="Gemini",
+                           sleep=fake_sleep, **kw)
 
 
 def stream_response(body):
@@ -59,7 +67,9 @@ def test_real_mcp_tool_schemas_are_gemini_safe():
 
     tools = to_openai_tools(asyncio.run(go()))
     blob = json.dumps(tools)
-    assert "anyOf" not in blob and '"title"' not in blob and '"default"' not in blob
+    assert "anyOf" not in blob and '"title": "' not in blob and '"default"' not in blob  # (a *parameter* named title is fine)
+    write = next(t for t in tools if t["function"]["name"] == "write_itinerary")
+    assert "title" in write["function"]["parameters"]["properties"]
     assert {t["function"]["name"] for t in tools} >= {"search_docs", "write_itinerary"}
 
 
@@ -170,3 +180,24 @@ def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
     # tools sent to Gemini carry no trip_id and no unsupported schema keywords
     sent = json.dumps(requests[0]["tools"])
     assert "trip_id" not in sent and "anyOf" not in sent
+
+
+def test_sanitize_keeps_a_parameter_named_title():
+    from app.agent.llm import sanitize_schema
+    out = sanitize_schema({"title": "Args", "type": "object", "required": ["title"],
+                           "properties": {"title": {"title": "Title", "anyOf": [{"type": "string"}, {"type": "null"}], "default": None}}})
+    assert out == {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+
+
+def test_app_made_tool_call_gets_a_dummy_gemini_signature_only_for_gemini():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "p1", "name": "search_docs", "input": {"query": "q"}, "synthetic": True}]}]
+    sig = {"google": {"thought_signature": "skip_thought_signature_validator"}}
+    assert to_openai_messages("S", msgs, gemini=True)[2]["tool_calls"][0]["extra_content"] == sig
+    assert "extra_content" not in to_openai_messages("S", msgs)[2]["tool_calls"][0]
+
+
+def test_local_llm_read_timeout_is_configurable():
+    o = build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="m",
+                           llm_base_url="http://localhost:8080/v1", llm_timeout_seconds=180))
+    assert o.client.timeout.read == 180

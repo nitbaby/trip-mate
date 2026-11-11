@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS undo_log (
   before TEXT, created_at TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS usage (
   conversation_id TEXT PRIMARY KEY, external_calls INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS llm_usage (
+  day TEXT NOT NULL, model_key TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, model_key));
 CREATE TABLE IF NOT EXISTS api_cache (
   key TEXT PRIMARY KEY, payload TEXT NOT NULL, fetched_at TEXT NOT NULL, ttl_seconds INTEGER NOT NULL);
 """
