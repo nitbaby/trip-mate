@@ -30,6 +30,8 @@ LLM_BASE_URL=http://localhost:8080/v1
 LLM_MODEL=qwen3-8b
 LLM_API_KEY=local
 ```
+**Other model:** Llama 3.1 8B Instruct is also supported (`make local-model LOCAL_MODEL=llama31`, `make local-llm LOCAL_MODEL=llama31 PORT=8081`, then `LLM_MODEL=llama3.1-8b` and port 8081 in `.env`). It is faster (9-16 s) but clearly weaker in our six-question test (about 3 of 6 good vs 5 of 6 for Qwen3-8B), so Qwen3-8B is the recommended default.
+
 Expect roughly 6-20 s per answer. Tool calling works in multi-agent mode (the default). Single-agent mode is less reliable on a small model (it can skip the document search), so keep `AGENT_MODE=multi`.
 
 ## Live data
