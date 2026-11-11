@@ -12,7 +12,7 @@ Facts (check-out 11:00 AM, flight JL 44 delayed 35 minutes, ...) come from the f
 | **B. Gemini** (`gemini-3.5-flash-lite`) | fastest, cleanest answers | 3-5 s per answer | needs internet and key; free tier 15 requests/min, 500/day; hosted tiers may retain prompts (fake data only) |
 | **C. Demo stand-in** (`LLM_PROVIDER=demo`) | emergency fallback or UI-only walkthrough | deterministic, offline | it is a rule-based stand-in, **not an AI**: say so |
 
-Recommended: **B for the main run, A for the optional privacy segment**, C kept ready as a fallback.
+**Decision (2026-11-11): the demo runs on A, the local Qwen3-8B** (nothing leaves the laptop, no quota). B (Gemini) is the backup if a question misbehaves live; C is the last-resort fallback. On the 45-question eval set Qwen3-8B passes 42; known weak spots to avoid on stage: asking one question that needs both the hotel check-out and the medication rules, and visa fees.
 
 ## 1. Setup (do this 30 minutes before)
 

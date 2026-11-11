@@ -106,7 +106,7 @@ def test_confidence_levels():
     assert assess([h(0.30)])[0] == "low"
     assert assess([h(0.38), h(0.28)])[0] == "high"           # same doc agrees
     assert assess([h(0.38, "a"), h(0.28, "b")])[0] == "low"  # different doc does not
-    assert [x["score"] for x in assess([h(0.5), h(0.1)])[1]] == [0.5]
+    assert [x["score"] for x in assess([h(0.5), h(0.05)])[1]] == [0.5]
 
 
 def test_places_generic_query_words_do_not_filter(tid):
@@ -119,10 +119,10 @@ def test_places_generic_query_words_do_not_filter(tid):
 def test_sibling_chunks_of_the_best_document_are_kept_below_the_threshold():
     from app.confidence import assess
     hits = [{"score": 0.69, "document_id": "a"}, {"score": 0.32, "document_id": "b"},
-            {"score": 0.24, "document_id": "a"}, {"score": 0.20, "document_id": "c"}, {"score": 0.12, "document_id": "a"}]
+            {"score": 0.15, "document_id": "a"}, {"score": 0.12, "document_id": "c"}, {"score": 0.05, "document_id": "a"}]
     level, usable = assess(hits)
-    assert level == "high" and [h["score"] for h in usable] == [0.69, 0.32, 0.24]
-    assert assess([{"score": 0.2, "document_id": "a"}, {"score": 0.19, "document_id": "a"}]) == ("none", [])
+    assert level == "high" and [h["score"] for h in usable] == [0.69, 0.32, 0.15]
+    assert assess([{"score": 0.1, "document_id": "a"}, {"score": 0.09, "document_id": "a"}]) == ("none", [])
 
 
 def test_flights_stay_mock_when_live_mode_is_real(monkeypatch):

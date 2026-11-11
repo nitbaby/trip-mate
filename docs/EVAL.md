@@ -29,3 +29,13 @@ Categories: `doc_fact` (24), `doc_multi` (2), `not_in_docs` (5), `sensitive` (4)
 - One run per question. Local models are not deterministic: expect ±2 questions between runs.
 - Only the sample documents. Thresholds tuned here may not hold for other real documents.
 - String matching can reject a correct answer worded unexpectedly and cannot judge fluency or completeness.
+
+## Results so far (Qwen3-8B via llama.cpp, multi mode, mock live data, 2026-11-11)
+| Run | Change before the run | Passed |
+|---|---|---|
+| 1 | baseline | 34/45 |
+| 2 | router word boundaries + guide/flight docs routing, `conf_high` 0.40 | 35/45 |
+| 3 | verifier (attribution sentence, ISO dates), "my hotel" prefetch | 39/45 |
+| 4 | `conf_low` 0.18 | 42/45 |
+
+Remaining failures: the two-fact check-out + medicine question, the visa fee (model answers from memory; the app now appends a "Not found in your documents as written" note, after run 4), a correct answer citing the wrong passage. `gemini-3.5-flash-lite` on 10 of the questions (before run 4's threshold change) failed the same retrieval-limited ones.

@@ -34,6 +34,13 @@ LLM_API_KEY=local
 
 Expect roughly 6-20 s per answer. Tool calling works in multi-agent mode (the default). Single-agent mode is less reliable on a small model (it can skip the document search), so keep `AGENT_MODE=multi`.
 
+## Quality checks
+```
+make test && make test-web    # 119 backend + 16 web unit tests
+make e2e                      # 5 browser flows (Playwright, system Chrome) on the demo LLM; starts its own servers on :8010/:5180
+make demo-reset demo-backend  # throwaway backend :8010 with local Qwen3 (make local-llm first); then: make eval   (45 questions, ~8 min; see docs/EVAL.md)
+```
+
 ## Live data
 `LIVE_MODE=mock` (default) uses fixtures. `LIVE_MODE=real` uses Open-Meteo (weather), Frankfurter (exchange rates) and OpenStreetMap Nominatim (places, without hours or ratings). Flights have no real provider: they stay mock (`LIVE_FLIGHTS=mock`).
 

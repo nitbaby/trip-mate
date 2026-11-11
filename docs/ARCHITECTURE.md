@@ -107,7 +107,7 @@ flowchart LR
   end
   subgraph Ask
     Qe["query"] --> Eq["embed"] --> Kn["top-k in Chroma, filtered by trip (and doc_type)"]
-    Kn --> Cf["confidence: score >= 0.40 high (or >= 0.35 + a second hit in the same doc),<br/>>= 0.25 low, else none"]
+    Kn --> Cf["confidence: score >= 0.40 high (or >= 0.35 + a second hit in the same doc),<br/>>= 0.18 low, else none"]
     Cf --> Sib["same-document sibling chunks within 0.10 below the low threshold are kept"]
     Sib --> Rd["redact sensitive values"] --> Nm["number passages [1] [2] ..."] --> Ag["agent answers with [n] markers"]
   end

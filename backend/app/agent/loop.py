@@ -380,8 +380,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             yield {"type": "confidence", "level": level}
             if level in ("low", "none") and not supported and len(full_text.strip()) > 80 and not NOT_FOUND.search(full_text):
                 # small models sometimes answer from memory when the search found nothing: say so, so it is not read as sourced
-                note = ("\n\n⚠️ This is not from your documents (nothing matching was found there), so treat it as general knowledge "
-                        "and check an official source.")
+                note = ("\n\n⚠️ Not found in your documents as written: treat this as unverified general knowledge and check an official source.")
                 turn.streamed += note
                 full_text += note
                 yield {"type": "token", "text": note}
