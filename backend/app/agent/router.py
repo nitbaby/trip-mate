@@ -12,8 +12,9 @@ AGENTS = {
     "itinerary": {"label": "Itinerary agent", "tools": {"read_itinerary", "write_itinerary"}},
 }
 
-LIVE = re.compile(r"flight|delay|gate|terminal|weather|forecast|rain|temperature|umbrella|vegetarian|vegan|restaurant|"
-                  r"\bfood\b|\beat\b|nearby|near me|near my|open now|cafe|convert|exchange rate|currency|\b(usd|jpy|eur|gbp|inr)\b|how much is", re.IGNORECASE)
+LIVE = re.compile(r"\bflights?\b|\bdelay(?:s|ed)?\b|\bgate\b|\bterminal\b|\bweather\b|\bforecast\b|\brain(?:ing|y)?\b|\btemperature\b|\bumbrella\b|"
+                  r"\bvegetarian\b|\bvegan\b|\brestaurants?\b|\bfood\b|\beat\b|\bnearby\b|near me|near my|open now|\bcafes?\b|\bconvert\b|"
+                  r"exchange rate|\bcurrency\b|\b(usd|jpy|eur|gbp|inr)\b|how much is", re.IGNORECASE)
 ITIN = re.compile(r"\b(add|book|schedule|cancel|remove|delete|move|reschedule|change)\b.*\b(itinerary|reservation|dinner|lunch|meeting|activity|tour)\b|"
                   r"itinerary|plan today|today's plan|what's on|my schedule|agenda|\bplans?\b|\bplanned\b|\bbooked\b|\bscheduled\b|"
                   r"things to do|what should i do|what do i have|\bactivit(?:y|ies)\b|sightseeing", re.IGNORECASE)
@@ -21,7 +22,9 @@ ITIN = re.compile(r"\b(add|book|schedule|cancel|remove|delete|move|reschedule|ch
 ADD_REQUEST = re.compile(r"^\W*(?:please |can you |could you )?(?:add|schedule|book|create|put)\b|"
                          r"\b(?:add|schedule|put)\b.{0,60}\b(?:to|on|in) (?:my |the )?(?:itinerary|schedule|plan)\b", re.IGNORECASE)
 DOCS_STRONG = re.compile(r"check-?\s?out|check-?\s?in|breakfast|\brules?\b|\bvisas?\b|customs|medic|policy|baggage|luggage|"
-                         r"cancellation|passport|confirmation|booking ref|wi-?fi|document|\bpdf\b", re.IGNORECASE)
+                         r"cancellation|passport|confirmation|booking ref|wi-?fi|document|\bpdf\b|"
+                         r"\bterminal\b|\bbags?\b|\bseat|boarding|\bfly\b|outbound|return flight|\btips?\b|\bguide\b|suica|pasmo|"
+                         r"\btrains?\b|subway|metro|police|ambulance|emergency|\batm\b|tax-free|tipping", re.IGNORECASE)
 DOCS_WEAK = re.compile(r"hotel|booking|reservation|ticket|lounge|airport|stay|room", re.IGNORECASE)
 
 

@@ -283,6 +283,8 @@ def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
     """Lookups made before the model's first turn: documents for document questions (and live questions about
     'my ...'), the itinerary for plan questions (an 'add ...' request skips it: it goes straight to the write)."""
     if agent == "docs" or (agent == "live" and re.search(r"\bmy\b", message, re.IGNORECASE)):
+        if agent == "live" and re.search(r"\bmy (?:hotel|accommodation|stay)\b", message, re.IGNORECASE):
+            return "search_docs", {"query": "hotel name and address"}  # the question's own words would match guide text, not the booking
         return "search_docs", {"query": message}
     if agent == "itinerary" and not ADD_REQUEST.search(message):
         return "read_itinerary", {}

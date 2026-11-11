@@ -65,3 +65,34 @@ local-llm:
 
 local-llm-info:
 	@echo "LOCAL_MODEL=$(LOCAL_MODEL)  alias=$(MODEL_ALIAS)  url=http://localhost:$(PORT)/v1  file=$(MODEL_DIR)/$(MODEL_FILE)"
+
+# ---- Demo and eval: throwaway backend :8010 + web :5180 with their OWN data dir (never touches data/ or :8000/:5173) ----
+# Local Qwen3-8B by default (start `make local-llm` first). Override with e.g. DEMO_LLM=demo for the rule-based stand-in.
+DEMO_DIR ?= /tmp/tm-demo
+DEMO_LLM ?= local
+ifeq ($(DEMO_LLM),demo)
+  DEMO_ENV = LLM_PROVIDER=demo
+else
+  DEMO_ENV = LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:8080/v1 LLM_MODEL=qwen3-8b LLM_API_KEY=local LLM_TIMEOUT_SECONDS=300
+endif
+
+# make demo-reset demo-backend   (then in other terminals: make demo-web, make seed)
+demo-reset:
+	rm -rf $(DEMO_DIR)
+
+demo-backend:
+	cd backend && TRIPMATE_DATA_DIR=$(DEMO_DIR) LIVE_MODE=mock AGENT_MODE=multi $(DEMO_ENV) ../$(PY)/uvicorn app.main:app --port 8010
+
+demo-web:
+	cd web && PATH=$(NODE22):$$PATH VITE_API_TARGET=http://localhost:8010 npx vite --port 5180
+
+# Trip + 4 sample documents + 1 itinerary item on the demo backend; prints the trip URL
+seed:
+	$(PY)/python scripts/demo_seed.py --with-itinerary
+
+# Score the 45-question eval set on the demo backend (it creates its own trip). make eval EVAL_LABEL=qwen3-8b
+EVAL_LABEL ?= qwen3-8b
+eval:
+	$(PY)/python scripts/eval.py --label $(EVAL_LABEL)
+
+.PHONY: eval seed demo-reset demo-backend demo-web

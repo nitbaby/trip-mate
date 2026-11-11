@@ -8,8 +8,13 @@ import re
 STOP = {"a", "an", "and", "are", "as", "at", "be", "been", "by", "can", "could", "did", "do", "does", "for", "from", "had", "has", "have", "how", "i", "if", "in", "is", "it", "its", "may", "me", "my", "no", "not", "of", "on", "or", "our", "should", "so", "some", "than", "that", "the", "their", "them", "then", "there", "these", "they", "this", "to", "up", "us", "was", "we", "were", "what", "when", "where", "which", "who", "will", "with", "would", "you", "your", "yes", "please", "also", "about", "into", "over", "after", "before", "only", "any", "all", "each", "per", "via"}
 
 
+MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+
 def norm_times(text: str) -> str:
-    """12-hour clock and ISO times become one form: '6:35 PM' and '...T18:35:00' both give '18:35'."""
+    """12-hour clock and ISO times become one form: '6:35 PM' and '...T18:35:00' both give '18:35'.
+    ISO dates become the written form: '2026-11-30' gives '30 november 2026' (documents usually write it that way)."""
+    text = re.sub(r"\b(\d{4})-(0[1-9]|1[0-2])-(\d{2})\b", lambda m: f"{int(m.group(3))} {MONTHS[int(m.group(2)) - 1]} {m.group(1)}", text)
     text = re.sub(r"(\d)T(\d)", r"\1 \2", text)
 
     def fix(m: re.Match) -> str:
@@ -46,18 +51,23 @@ def _claims(segment: str) -> list[tuple[str, str]]:
 def verify_citations(text: str, refs: dict[int, dict], evidence: list[str] | None = None, threshold: float = 0.35) -> dict[str, bool]:
     """Return {marker_number: supported}. A marker is supported if it supports at least one claim citing it."""
     pool_extra = set(content_words(" ".join(evidence or [])))
+
+    def supports(claim: str, ref_text: str) -> bool:
+        words = content_words(claim)
+        if not words:
+            return True
+        pool = set(content_words(ref_text)) | pool_extra
+        numbers = [w for w in words if any(c.isdigit() for c in w)]
+        return sum(w in pool for w in words) / len(words) >= threshold and all(n in pool for n in numbers)
+
     support: dict[str, bool] = {}
+    prev = ""  # previous sentence: models often put the marker after a sentence like "This is in the documents [1]."
     for seg in re.split(r"(?<=[.!?])\s+|\n+", text):
         for m, claim in _claims(seg):
             ref = refs.get(int(m))
             if ref is None:
                 continue
-            words = content_words(claim)
-            if not words:
-                ok = True
-            else:
-                pool = set(content_words(ref["text"])) | pool_extra
-                numbers = [w for w in words if any(c.isdigit() for c in w)]
-                ok = sum(w in pool for w in words) / len(words) >= threshold and all(n in pool for n in numbers)
+            ok = supports(claim, ref["text"]) or (bool(prev) and supports(f"{prev} {claim}", ref["text"]))
             support[m] = support.get(m, False) or ok
+        prev = re.sub(r"\[\d+\]", "", seg).strip()
     return support

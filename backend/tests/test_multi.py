@@ -36,6 +36,18 @@ def chat(client, tid, message, llm, cid=None):
     return events
 
 
+def test_verifier_marker_after_an_attribution_sentence_and_iso_dates():
+    """Found by the eval set: 'fact. This is based on the documents [1].' and '2026-11-30' vs '30 November 2026' were rejected."""
+    refs = {1: {"text": "Visitors may bring in 400 cigarettes and 3 bottles of alcohol (760 ml each) duty-free."},
+            2: {"text": "Departs: London Heathrow (LHR) Terminal 3, 30 November 2026, 6:00 PM"}}
+    ok = "You can bring in 3 bottles of alcohol (760 ml each) duty-free. This information is based on the customs rules in the documents [1]."
+    assert verify_citations(ok, refs) == {"1": True}
+    wrong = "You can bring in 5 bottles of alcohol (760 ml each) duty-free. This information is based on the customs rules in the documents [1]."
+    assert verify_citations(wrong, refs) == {"1": False}  # the previous sentence is checked too: a wrong number still fails
+    assert verify_citations("The flight departs on 2026-11-30 at 6:00 PM [2].", refs) == {"2": True}
+    assert verify_citations("The flight departs on 2026-11-29 at 6:00 PM [2].", refs) == {"2": False}
+
+
 # ---------- router ----------
 @pytest.mark.parametrize("q,expected", [
     ("What time is check-out, and does the hotel include breakfast?", ["docs"]),
@@ -47,6 +59,12 @@ def chat(client, tid, message, llm, cid=None):
     ("What's the weather in Tokyo and what's the check-out time?", ["docs", "live"]),
     ("hi", ["docs"]),
     ("What is the Wi-Fi password at the airport lounge?", ["docs"]),
+    # found by the eval set: "rain" used to match inside "trains", and guide/flight-document questions went to live only
+    ("When do the trains stop running at night?", ["docs"]),
+    ("Which terminal do I fly from at Heathrow?", ["docs", "live"]),
+    ("Any tips for eating vegetarian in Tokyo?", ["docs", "live"]),
+    ("How heavy can my checked bag be?", ["docs"]),
+    ("Will it rain tomorrow?", ["live"]),
 ])
 def test_router(q, expected):
     assert route(q) == expected
@@ -302,3 +320,10 @@ def test_live_answer_without_citations_has_no_document_confidence_badge(client, 
     llm = ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 1})]}, {"text": "Tokyo will be clear, 13C."}])
     ev = chat(client, trip, "What is the weather in Tokyo for my trip?", llm)  # "my" prefetches a docs search too
     assert "confidence" not in types(ev)
+
+
+def test_prefetch_query_for_my_hotel_looks_up_the_hotel_not_the_question():
+    from app.agent.loop import _prefetch
+    assert _prefetch("live", "Find a vegetarian restaurant near my hotel.") == ("search_docs", {"query": "hotel name and address"})
+    assert _prefetch("live", "Is my flight delayed?") == ("search_docs", {"query": "Is my flight delayed?"})
+    assert _prefetch("docs", "What time is check-out?") == ("search_docs", {"query": "What time is check-out?"})

@@ -14,3 +14,4 @@ test-results/
 .idea/
 models/
 rag_report.html
+eval/results/

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
     # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6
-    conf_high: float = 0.45
+    conf_high: float = 0.40
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
     conf_sibling_margin: float = 0.10  # same-document chunks this far below conf_low are still returned
     conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
