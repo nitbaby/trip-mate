@@ -256,3 +256,24 @@ def test_only_explicit_add_requests_force_the_write_tool(msg, forced):
     from app.agent.loop import _force
     assert (_force("itinerary", msg) == "write_itinerary") is forced
     assert _force("docs", msg) is None
+
+
+# ---------- itinerary context for every agent ----------
+def test_every_agent_sees_the_travelers_itinerary(client, trip):
+    client.post(f"/api/trips/{trip}/itinerary", json={"type": "activity", "title": "Japanese Garden Visit",
+                                                      "start_at": "2026-12-01T10:00:00"})
+    llm = ScriptedLLM([{"text": "On Dec 1 you have a Japanese Garden Visit at 10:00."}])
+    ev = chat(client, trip, "Is the weather good for my day out?", llm)  # routed to live, not itinerary
+    assert ev[0]["agent"] == "live"
+    assert "Japanese Garden Visit" in llm.calls[0]["system"] and "2026-12-01 10:00" in llm.calls[0]["system"]
+    assert "NOT documents" in llm.calls[0]["system"]
+
+
+def test_empty_itinerary_is_stated_and_plan_wordings_reach_the_itinerary_agent(client, trip):
+    llm = ScriptedLLM([{"text": "Nothing planned yet."}])
+    ev = chat(client, trip, "What is planned for my trip on Dec 1?", llm)
+    assert ev[0]["agent"] == "itinerary" and "empty so far" in llm.calls[0]["system"]
+    for q in ["What are my travel plans?", "What should I do on December 1?", "Do I have anything booked on Dec 1?"]:
+        assert route(q) == ["itinerary"], q
+    for q in ["What time is check-out?", "Is my 6 PM flight delayed?", "What are the rules for medication?"]:
+        assert "itinerary" not in route(q), q

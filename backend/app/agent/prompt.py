@@ -2,6 +2,26 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
+def itinerary_block(items: list[dict] | None, limit: int = 30) -> str:
+    """The traveler's own itinerary (entered in the app), shown to every agent so plan questions never depend on routing."""
+    if items is None:
+        return ""
+    if not items:
+        return "\nTraveler's itinerary (their own plans, entered in the app): empty so far."
+    from ..ingest.mask import redact
+
+    lines = []
+    for i in items[:limit]:
+        when = (i["start_at"] or "")[:16].replace("T", " ")
+        extra = f" @ {i['location']}" if i.get("location") else ""
+        who = "added by the assistant" if i.get("source") == "agent" else "added by the traveler"
+        lines.append(f"- {when}  {redact(i['title'])} [{i['type']}]{extra}, {who}")
+    more = f"\n(+{len(items) - limit} more: use read_itinerary)" if len(items) > limit else ""
+    return ("\nTraveler's itinerary (their own plans, entered in the app; NOT documents, so never cite them as [n]). "
+            "For any question about plans, activities, what is booked or what to do on a day, answer from this list:\n"
+            + "\n".join(lines) + more)
+
+
 def prefs_line(prefs: dict | None) -> str:
     if not prefs:
         return ""
@@ -15,7 +35,7 @@ def prefs_line(prefs: dict | None) -> str:
     return ("\nTraveler preferences: " + "; ".join(bits) + ".") if bits else ""
 
 
-def system_prompt(trip: dict, now: datetime | None = None, prefs: dict | None = None) -> str:
+def system_prompt(trip: dict, now: datetime | None = None, prefs: dict | None = None, itinerary: list[dict] | None = None) -> str:
     tz = trip["timezone"]
     try:
         now = now or datetime.now(ZoneInfo(tz))
@@ -24,7 +44,7 @@ def system_prompt(trip: dict, now: datetime | None = None, prefs: dict | None = 
     return f"""You are TripMate, a travel assistant for one traveler during their trip. Be concise: answers are read on a phone.
 
 Trip: {trip['name']}. Destinations: {', '.join(trip['destinations'])}. Dates: {trip['start_date']} to {trip['end_date']}.
-Trip timezone: {tz}. Right now it is {now.strftime('%A %Y-%m-%d %H:%M')} in that timezone. Resolve "today", "tomorrow" and times from this.{prefs_line(prefs)}
+Trip timezone: {tz}. Right now it is {now.strftime('%A %Y-%m-%d %H:%M')} in that timezone. Resolve "today", "tomorrow" and times from this.{prefs_line(prefs)}{itinerary_block(itinerary)}
 
 How to work:
 1. For any question about the traveler's own bookings, rules, plans or documents, call search_docs first. Never answer such questions from memory.
@@ -54,7 +74,8 @@ ROLE_RULES = {
 4. Sensitive values (passport, booking reference, card) are masked; never reconstruct them.
 5. For visas, medication, customs and currency rules, remind the traveler to verify with an official source.
 6. Search results already may be provided at the start; read them carefully (e.g. check-out time vs. LATE check-out time are different facts) and quote the exact value the passage states.
-7. Each step is slow: search once with a good query unless the first results are clearly insufficient."""),
+7. If the question is really about the traveler's own plans or activities (see the itinerary listed above), answer from that list, not from documents.
+8. Each step is slow: search once with a good query unless the first results are clearly insufficient."""),
     "live": ("Live information agent", """Your job: current information (flights, weather, nearby places, currency) using your tools.
 1. If the question refers to "my flight" or "my hotel", use the document passages already provided (or call search_docs once) to find the flight number or the hotel's name and ADDRESS, then pass that address (never the words "my hotel") as the location of search_places. In the same step call any live tool you can already fill in. Cite document facts with their [n] ref.
 2. Use get_flight_status, get_weather, search_places and convert_currency for live facts and say how fresh they are (last_updated).
@@ -63,7 +84,7 @@ ROLE_RULES = {
     "itinerary": ("Itinerary agent", """Your job: read and change the traveler's itinerary.
 1. Only change the itinerary (write_itinerary) when the traveler asks. Use ISO 8601 local times without a timezone offset, e.g. 2026-12-02T20:00:00. A create always needs type, title and start_at.
 2. Only say a change was made if write_itinerary returned success. If it returned an error, say the change failed (or retry with corrected arguments). Never claim an addition that did not happen. After a successful change, say what you changed and that it can be undone. If the result lists conflicts_with, warn about the overlap.
-3. Use read_itinerary to answer questions about the plan; do not call it when you don't need it.
+3. The itinerary is already listed above: answer plan questions from that list. Call read_itinerary only when you need more than is listed (it can filter by date; a date-only end date covers the whole day).
 4. To add something you MUST call write_itinerary. Reading the itinerary does not change it. Never say you added something unless write_itinerary succeeded."""),
 }
 
@@ -74,7 +95,8 @@ COMPOSER_RULES = """You are the COMPOSER. Specialist agents have already researc
 4. No preamble about agents; just answer."""
 
 
-def role_prompt(role: str, trip: dict, now: datetime | None = None, prefs: dict | None = None) -> str:
+def role_prompt(role: str, trip: dict, now: datetime | None = None, prefs: dict | None = None,
+                itinerary: list[dict] | None = None) -> str:
     tz = trip["timezone"]
     try:
         now = now or datetime.now(ZoneInfo(tz))
@@ -82,7 +104,7 @@ def role_prompt(role: str, trip: dict, now: datetime | None = None, prefs: dict 
         now = now or datetime.now(ZoneInfo("UTC"))
     label, rules = ROLE_RULES[role]
     head = _HEAD.format(role=label.lower(), name=trip["name"], dest=", ".join(trip["destinations"]), start=trip["start_date"],
-                        end=trip["end_date"], tz=tz, now=now.strftime("%A %Y-%m-%d %H:%M"), prefs=prefs_line(prefs))
+                        end=trip["end_date"], tz=tz, now=now.strftime("%A %Y-%m-%d %H:%M"), prefs=prefs_line(prefs) + itinerary_block(itinerary))
     return head + "\n" + rules
 
 

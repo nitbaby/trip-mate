@@ -15,7 +15,8 @@ AGENTS = {
 LIVE = re.compile(r"flight|delay|gate|terminal|weather|forecast|rain|temperature|umbrella|vegetarian|vegan|restaurant|"
                   r"\bfood\b|\beat\b|nearby|near me|near my|open now|cafe|convert|exchange rate|currency|\b(usd|jpy|eur|gbp|inr)\b|how much is", re.IGNORECASE)
 ITIN = re.compile(r"\b(add|book|schedule|cancel|remove|delete|move|reschedule|change)\b.*\b(itinerary|reservation|dinner|lunch|meeting|activity|tour)\b|"
-                  r"itinerary|plan today|today's plan|what's on|my schedule|agenda", re.IGNORECASE)
+                  r"itinerary|plan today|today's plan|what's on|my schedule|agenda|\bplans?\b|\bplanned\b|\bbooked\b|\bscheduled\b|"
+                  r"things to do|what should i do|what do i have|\bactivit(?:y|ies)\b|sightseeing", re.IGNORECASE)
 # patterns that mean "look it up in my documents" even when a live or itinerary word is also present
 DOCS_STRONG = re.compile(r"check-?\s?out|check-?\s?in|breakfast|\brules?\b|\bvisas?\b|customs|medic|policy|baggage|luggage|"
                          r"cancellation|passport|confirmation|booking ref|wi-?fi|document|\bpdf\b", re.IGNORECASE)

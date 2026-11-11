@@ -15,6 +15,7 @@ import anthropic
 
 from ..config import get_settings
 from ..db import connect, new_id, now_iso
+from ..services.itinerary import list_items
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
@@ -94,6 +95,7 @@ class Turn:
     tools: list[dict]
     with_trip: set[str]
     prefs: dict | None = None
+    itinerary: list[dict] | None = None                        # the traveler's items, shown to every agent
     refs: dict[int, dict] = field(default_factory=dict)       # [n] -> citation target + passage text (server side only)
     evidence: list[str] = field(default_factory=list)         # live tool results, used by the verifier
     conf_levels: list[str] = field(default_factory=list)
@@ -241,13 +243,20 @@ async def _merge(gens: list[AsyncIterator[dict]]) -> AsyncIterator[dict]:
 async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
     out: dict = {}
     msgs = [*history, {"role": "user", "content": user_message}]
-    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs), allowed=None,
+    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=None,
                               messages=msgs, stream_text=True, out=out, force_first_tool=_force(None, user_message)):
         yield ev
 
 
 ADD_REQUEST = re.compile(r"^\W*(?:please |can you |could you )?(?:add|schedule|book|create|put)\b|"
                          r"\b(?:add|schedule|put)\b.{0,60}\b(?:to|on|in) (?:my |the )?(?:itinerary|schedule|plan)\b", re.IGNORECASE)
+
+
+def _itinerary(conn, trip_id: str) -> list[dict] | None:
+    try:
+        return list_items(conn, trip_id)
+    except Exception:  # noqa: BLE001 - context only: never fail a chat turn because of it
+        return None
 
 
 def _strict_create(tool: dict) -> dict:
@@ -285,13 +294,13 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
     msgs = [*history, {"role": "user", "content": user_message}]
     if len(intents) == 1:  # the specialist answers the user directly: no extra composer call
         a = intents[0]
-        async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs),
+        async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary),
                                   allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={},
                                   prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)):
             yield ev
         return
     outs: dict[str, dict] = {a: {} for a in intents}
-    gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs), allowed=AGENTS[a]["tools"],
+    gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=AGENTS[a]["tools"],
                       messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS,
                       prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)) for a in intents]
     async for ev in _merge(gens):
@@ -329,7 +338,8 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         except Exception:  # noqa: BLE001
             yield {"type": "error", "code": "AGENT_FAILED", "message": "The tool server is unavailable.", "retryable": True}
             return
-        turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs)
+        turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs,
+                    itinerary=_itinerary(conn, trip["id"]))
         answer = _answer_multi if mode == "multi" else _answer_single
         async for ev in answer(turn, llm, history, user_message):
             yield ev
