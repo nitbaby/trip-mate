@@ -18,6 +18,7 @@ def itinerary_block(items: list[dict] | None, limit: int = 30) -> str:
         lines.append(f"- {when}  {redact(i['title'])} [{i['type']}]{extra}, {who}")
     more = f"\n(+{len(items) - limit} more: use read_itinerary)" if len(items) > limit else ""
     return ("\nTraveler's itinerary (their own plans, entered in the app; NOT documents, so never cite them as [n]). "
+            "This list is read fresh from the app for this message and overrides anything said earlier in the conversation. "
             "For any question about plans, activities, what is booked or what to do on a day, answer from this list:\n"
             + "\n".join(lines) + more)
 

@@ -113,7 +113,7 @@ async def _none():
 
 async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed: set[str] | None, messages: list[dict],
                     stream_text: bool, out: dict, max_iter: int = MAX_ITERATIONS,
-                    prefetch_docs: str | None = None, force_first_tool: str | None = None) -> AsyncIterator[dict]:
+                    prefetch: tuple[str, dict] | None = None, force_first_tool: str | None = None) -> AsyncIterator[dict]:
     """Run one agent to completion. Yields events; the agent's answer is left in out["text"]."""
     s = get_settings()
     tag = {"agent": agent} if agent else {}
@@ -125,10 +125,11 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
     exhausted = True
     for it in range(max_iter):
         final, last_text = None, ""
-        if it == 0 and prefetch_docs and any(t["name"] == "search_docs" for t in tools):
-            # Small models sometimes skip search_docs and answer from memory: search deterministically first.
-            final = {"content": [{"type": "tool_use", "id": "prefetch_docs", "name": "search_docs",
-                                  "input": {"query": prefetch_docs}, "synthetic": True}], "stop_reason": "tool_use"}
+        if it == 0 and prefetch and any(t["name"] == prefetch[0] for t in tools):
+            # Small models sometimes skip the lookup, or copy an earlier "not found" reply from the chat history:
+            # make the first lookup deterministically, so a fresh result is always in front of the model.
+            final = {"content": [{"type": "tool_use", "id": f"prefetch_{prefetch[0]}", "name": prefetch[0],
+                                  "input": prefetch[1], "synthetic": True}], "stop_reason": "tool_use"}
         else:
             turn.llm_calls += 1
         forced = {"force_tool": force_first_tool} if it == 0 and force_first_tool and any(t["name"] == force_first_tool for t in tools) else {}
@@ -282,10 +283,13 @@ def _force(agent: str | None, message: str) -> str | None:
     return "write_itinerary" if agent in (None, "itinerary") and ADD_REQUEST.search(message) else None
 
 
-def _prefetch(agent: str, message: str) -> str | None:
-    """Questions about the traveler's own documents always get a search first; live questions about 'my ...' too."""
+def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
+    """Lookups made before the model's first turn: documents for document questions (and live questions about
+    'my ...'), the itinerary for plan questions (an 'add ...' request skips it: it goes straight to the write)."""
     if agent == "docs" or (agent == "live" and re.search(r"\bmy\b", message, re.IGNORECASE)):
-        return message
+        return "search_docs", {"query": message}
+    if agent == "itinerary" and not ADD_REQUEST.search(message):
+        return "read_itinerary", {}
     return None
 
 
@@ -296,13 +300,13 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
         a = intents[0]
         async for ev in run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary),
                                   allowed=AGENTS[a]["tools"], messages=msgs, stream_text=True, out={},
-                                  prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)):
+                                  prefetch=_prefetch(a, user_message), force_first_tool=_force(a, user_message)):
             yield ev
         return
     outs: dict[str, dict] = {a: {} for a in intents}
     gens = [run_agent(turn, llm, agent=a, system=role_prompt(a, turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=AGENTS[a]["tools"],
                       messages=msgs, stream_text=False, out=outs[a], max_iter=SPECIALIST_ITERATIONS,
-                      prefetch_docs=_prefetch(a, user_message), force_first_tool=_force(a, user_message)) for a in intents]
+                      prefetch=_prefetch(a, user_message), force_first_tool=_force(a, user_message)) for a in intents]
     async for ev in _merge(gens):
         yield ev
     findings = "\n\n".join(f"[{AGENTS[a]['label']}]\n{outs[a].get('text', '').strip() or '(no answer)'}" for a in intents)

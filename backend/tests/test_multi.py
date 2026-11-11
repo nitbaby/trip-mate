@@ -92,7 +92,7 @@ def test_verifier_real_gemini_answers():
 # ---------- single specialist ----------
 def _hash_friendly_prefetch(monkeypatch):
     """Tests use the hash embedder, which scores long natural-language queries low: prefetch a keyword query instead."""
-    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: Q_HOTEL if agent == "docs" else None)
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: ("search_docs", {"query": Q_HOTEL}) if agent == "docs" else None)
 
 
 def test_docs_agent_answers_directly_with_verified_citation(client, trip, monkeypatch):
@@ -277,3 +277,17 @@ def test_empty_itinerary_is_stated_and_plan_wordings_reach_the_itinerary_agent(c
         assert route(q) == ["itinerary"], q
     for q in ["What time is check-out?", "Is my 6 PM flight delayed?", "What are the rules for medication?"]:
         assert "itinerary" not in route(q), q
+
+
+def test_plan_questions_read_the_itinerary_first_even_after_stale_not_found_replies(client, trip):
+    client.post(f"/api/trips/{trip}/itinerary", json={"type": "activity", "title": "Japanese Garden Visit",
+                                                      "start_at": "2026-12-01T10:00:00"})
+    stale = "I could not find any specific itinerary details for your trip in the provided documents."
+    for _ in range(2):  # a conversation whose earlier answers were wrong
+        ev = chat(client, trip, "What is the itinerary for this trip?", ScriptedLLM([{"text": stale}]), cid="c1")
+    llm = ScriptedLLM([{"text": "You have a Japanese Garden Visit on Dec 1."}])
+    ev = chat(client, trip, "What is the itinerary for this trip?", llm, cid="c1")
+    assert [e["name"] for e in ev if e["type"] == "tool_start"] == ["read_itinerary"]  # prefetched, before the model spoke
+    last = llm.calls[0]["messages"][-1]["content"][0]["content"]
+    assert "Japanese Garden Visit" in last
+    assert "overrides anything said earlier" in llm.calls[0]["system"]
