@@ -10,12 +10,12 @@ Assumption: one developer working with Claude (not the spec's team of 4-5), orde
 
 ## 1. Current state (as of 2026-11-11)
 
-- Repo: `/Users/A-7878/Learning/trip-mate` (git, branch **`multi-agent-mode`**, all work committed; `main` is behind). Old copy at `/Users/A-7878/Learning/Claude_Learnings/TripMate` is a stale leftover: ignore it, never work there.
-- Remote `origin` = https://github.com/nitbaby/trip-mate. **Not pushed:** the first push failed with `403 Your account is suspended` (GitHub account issue, user must resolve). Retry `git push -u origin main` only when the user says so.
+- Repo: `/Users/A-7878/Learning/trip-mate` (git, branch **`phase-7`**, same commit as `origin/main` = Phase 6 merged via PR #3). Old copy at `/Users/A-7878/Learning/Claude_Learnings/TripMate` is a stale leftover: ignore it, never work there.
+- Remote `origin` = https://github.com/nitbaby/trip-mate. Pushing works now (the earlier 403 "account suspended" is resolved: PRs #1-#3 are merged).
 - Done and working: backend (trips, docs ingestion, RAG, itinerary, undo), MCP tool server (7 tools), agent runtime in **multi-agent mode by default** (router -> specialists -> composer -> citation verifier; single-agent mode still available), React PWA UI (chat, itinerary, docs, settings), demo stand-in LLM.
-- Tests: **111 backend** (`make test`, ~2-3 min) + **16 web** (`make test-web`). Both must stay green. Run the backend suite with no `LLM_*`/`TRIPMATE_DATA_DIR` variables exported (they leak into `test_factory_selection`).
+- Tests: **~111-119 backend (counts in README and here disagree; re-count with `make test`)** (`make test`, ~2-3 min) + **16 web** (`make test-web`). Both must stay green. Run the backend suite with no `LLM_*`/`TRIPMATE_DATA_DIR` variables exported (they leak into `test_factory_selection`).
 - LLM status: default provider is Gemini (`gemini-3.5-flash-lite`) and **the user's key works** (verified 2026-11-10 with `scripts/llm_check.py`). User-stated limits: **15 requests/minute, 500/day**. Earlier the same day the API returned HTTP 402 "prepayment credits are depleted" for two models; it later worked again (cause unknown, possibly billing/quota state changed). If 402 or 429 appears, see Notes. Budget real-LLM runs: one question = 2-5 requests (compound multi-agent questions up to 5), so ~3 questions/minute and ~100-250 questions/day; `compare_modes.py` over 7 questions x 2 modes is ~40 requests.
-- **Next step: finish Phase 6 (eval, E2E, fixes done: see "Phase 6 progress"; left: final cleanup, push, optional walkthrough).** Phase 5 (offline PWA) and the accessibility pass were dropped by the user on 2026-11-11. Phase 4c is done (below).
+- **Next step: none planned.** The user decided on 2026-11-11 that no further phases are needed for now. Work from here is bug fixes and optionally integrating other LLMs, on request. Phases 0-4, 4b-4d and 6 are done and merged; Phase 5 (offline PWA) and the accessibility pass were dropped. Open items are in "Backlog" below.
 
 ### How to run things
 ```
@@ -128,12 +128,11 @@ Playwright E2E (`e2e/`, system Chrome via `channel: "chrome"`, phone viewport) f
 - Thresholds (calibrated on 26 answerable + 5 unanswerable questions over 4 sample documents, one embedder: a sanity check, not a guarantee): `conf_high` 0.45 -> 0.40 (correct answers scoring 0.41-0.44 no longer show "low"; no unanswerable question newly "high"); `conf_low` 0.25 -> 0.18 (answer chunks at 0.20-0.23 were cut: the Gemini spot check failed the same questions, so the cause was retrieval, not the model). Scores cannot separate answerable from unanswerable on-topic questions (pool hours, seat number, visa fee 0.445-0.45), so refusals depend on the model reading the passages.
 - Gemini spot check (`gemini-3.5-flash-lite`, 10 questions, 19 LLM calls): 6/10 before the `conf_low` change; the 4 failures were the retrieval misses above (checked bag, transport card, last trains, two-fact question). Not re-run after the change.
 - Still failing on Qwen3-8B (run 4): the two-fact question (`multi-checkout-otc`: check-out misread as "until 1:00 PM", one query cannot return both documents' chunks), the visa fee (answered from memory; the note was added after run 4 and is only unit-tested), and a correct police-number answer that cites the wrong passage `[2]`.
-- Not done yet: refresh README/DEMO_PLAN screenshots/walkthrough, final cleanup, push (branch `phase-6-hardening` is local only).
+- Merged in PR #3. Not done: refresh README/DEMO_PLAN screenshots/walkthrough; re-run the Gemini spot check after the `conf_low` change.
 
 ### Backlog / open items
 - **Gemini is unblocked:** re-run the 6 demo questions on `gemini-3.5-flash-lite` (own backend :8010, real onnx embeddings, `samples/`), then `compare_modes.py --yes`. Confirm tool use on the lite model for medication, places, itinerary add and not-found (not yet seen).
 - ~~Rate-limit handling~~ **DONE** (see Phase 4d below). Still to verify in a browser: the amber "Waiting for the assistant's rate limit" banner in the chat UI (covered by reducer tests and a live CLI run, not yet screenshotted).
-- Push to GitHub once the account issue is resolved.
 - Map screen (stretch, cut), real flight provider (optional).
 - DONE (needs a real-LLM check): verifier LLM rescue (`VERIFIER_LLM_RESCUE`, rescue-only: restores a rejected citation, never removes one; scripted-LLM tests; its own effect on citations is not yet isolated in an eval).
 - DONE (needs a real-LLM check): router LLM fallback (`ROUTER_LLM_FALLBACK`, paraphrase eval on Qwen3-8B: 4/11 off, 8/11 on, see docs/EVAL.md; not yet measured on Gemini; after prompt tightening + live-only widening + proximity phrase: still 8/11, with live questions (jacket, coffee shops) now sometimes routed to docs; prompt needs a better balance, ideally measured on more than 11 questions).

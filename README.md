@@ -47,4 +47,8 @@ make demo-reset demo-backend  # throwaway backend :8010 with local Qwen3 (make l
 ## Status
 - [x] Phase 0 scaffold
 - [x] Phase 1 backend core (trips, documents ingestion, itinerary)
-- [x] Phase 3 MCP + live tools · [x] Phase 2 RAG + agent (live Claude test pending a valid API key) · [x] Phase 4 PWA UI (offline + install = Phase 5) · [ ] Phase 5 offline · [ ] Phase 6 hardening
+- [x] Phase 2 RAG + agent (single and multi-agent modes)
+- [x] Phase 3 MCP tool server + live tools
+- [x] Phase 4 PWA UI (chat, itinerary, docs, settings), multi-agent mode, local open-weight model, LLM rate-limit handling
+- [ ] Phase 5 offline + installable PWA (not planned: dropped from scope)
+- [x] Phase 6 hardening (eval set, Playwright E2E, demo seed/reset)
