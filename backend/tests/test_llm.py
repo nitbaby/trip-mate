@@ -195,3 +195,9 @@ def test_app_made_tool_call_gets_a_dummy_gemini_signature_only_for_gemini():
     sig = {"google": {"thought_signature": "skip_thought_signature_validator"}}
     assert to_openai_messages("S", msgs, gemini=True)[2]["tool_calls"][0]["extra_content"] == sig
     assert "extra_content" not in to_openai_messages("S", msgs)[2]["tool_calls"][0]
+
+
+def test_local_llm_read_timeout_is_configurable():
+    o = build_llm(Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="m",
+                           llm_base_url="http://localhost:8080/v1", llm_timeout_seconds=180))
+    assert o.client.timeout.read == 180

@@ -32,9 +32,14 @@ build-web:
 dev-backend-demo:
 	cd backend && LLM_PROVIDER=demo ../$(PY)/uvicorn app.main:app --reload --port 8000
 
-# Local open-weight model (no cloud LLM). Needs: brew install llama.cpp ; pip install -e "backend[local]"
+# Local open-weight model (no cloud LLM, no key, nothing leaves the machine).
+# Needs: brew install llama.cpp ; .venv/bin/pip install -e "backend[local]"   (then make local-model, make local-llm)
+# If modelscope fails with CERTIFICATE_VERIFY_FAILED (corporate TLS inspection), point it at a CA bundle:
+#   make local-model CA_BUNDLE=/path/to/ca.pem   (system certs + your company root certificate in one PEM file)
+CA_BUNDLE ?=
 local-model:
-	$(PY)/modelscope download --model Qwen/Qwen2.5-7B-Instruct-GGUF --include "qwen2.5-7b-instruct-q4_k_m*.gguf" --local_dir models/qwen2.5-7b
+	$(if $(CA_BUNDLE),SSL_CERT_FILE=$(CA_BUNDLE) REQUESTS_CA_BUNDLE=$(CA_BUNDLE) )$(PY)/modelscope download --model Qwen/Qwen3-8B-GGUF --include "Qwen3-8B-Q4_K_M.gguf" --local_dir models/qwen3-8b
 
+# --jinja: tool calling; enable_thinking=false: Qwen3 answers directly (thinking mode is far too slow here)
 local-llm:
-	llama-server -m models/qwen2.5-7b/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf --alias qwen2.5-7b --jinja -c 8192 -ngl 99 --port 8080
+	llama-server -m models/qwen3-8b/Qwen3-8B-Q4_K_M.gguf --alias qwen3-8b --jinja --chat-template-kwargs '{"enable_thinking":false}' -c 8192 -ngl 99 --port 8080

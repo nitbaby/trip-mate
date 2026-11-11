@@ -291,3 +291,14 @@ def test_plan_questions_read_the_itinerary_first_even_after_stale_not_found_repl
     last = llm.calls[0]["messages"][-1]["content"][0]["content"]
     assert "Japanese Garden Visit" in last
     assert "overrides anything said earlier" in llm.calls[0]["system"]
+
+
+def test_scheduling_requests_reach_the_itinerary_agent():
+    for q in ["Schedule a visit to Senso-ji on 2 December at 10 AM.", "Add a museum visit on Dec 3", "Book a tour for Friday"]:
+        assert route(q) == ["itinerary"], q
+
+
+def test_live_answer_without_citations_has_no_document_confidence_badge(client, trip):
+    llm = ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 1})]}, {"text": "Tokyo will be clear, 13C."}])
+    ev = chat(client, trip, "What is the weather in Tokyo for my trip?", llm)  # "my" prefetches a docs search too
+    assert "confidence" not in types(ev)

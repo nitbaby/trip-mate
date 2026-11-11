@@ -20,7 +20,7 @@ from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
 from .ratelimit import quota_status
-from .router import AGENTS, route
+from .router import ADD_REQUEST, AGENTS, route
 from .verify import verify_citations
 
 MAX_ITERATIONS = 8
@@ -249,10 +249,6 @@ async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str
         yield ev
 
 
-ADD_REQUEST = re.compile(r"^\W*(?:please |can you |could you )?(?:add|schedule|book|create|put)\b|"
-                         r"\b(?:add|schedule|put)\b.{0,60}\b(?:to|on|in) (?:my |the )?(?:itinerary|schedule|plan)\b", re.IGNORECASE)
-
-
 def _itinerary(conn, trip_id: str) -> list[dict] | None:
     try:
         return list_items(conn, trip_id)
@@ -370,7 +366,8 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         for m in supported:
             r = turn.refs[int(m)]
             yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}
-        if turn.conf_levels and not turn.wrote_itinerary:  # actions skip the confidence check (spec 3.3)
+        live_answer = bool(turn.evidence) and not supported  # answered from live data (shown with its own last-updated time)
+        if turn.conf_levels and not turn.wrote_itinerary and not live_answer:  # actions skip the confidence check (spec 3.3)
             level = max(turn.conf_levels, key=RANK.get)
             if level != "none" and not supported:
                 level = "low"  # CHAT-02: no (grounded) citation means no "high"
