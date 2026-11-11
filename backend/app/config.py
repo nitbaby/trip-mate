@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     live_mode: str = "mock"  # mock | real
+    live_flights: str = "mock"  # mock | real: flights have no real provider yet, so LIVE_MODE=real keeps mock flights by default
     embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
     # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6

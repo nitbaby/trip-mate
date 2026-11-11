@@ -34,6 +34,6 @@ def get_flight_status(flight_number: str, date: str) -> dict:
     if not re.fullmatch(r"[A-Z0-9]{2}\d{1,4}", fn):
         raise ValueError("flight_number must look like 'JL44'")
     datetime.fromisoformat(date)  # validates YYYY-MM-DD
-    if get_settings().live_mode == "real":
-        raise NotImplementedError("Real flight provider not configured; use LIVE_MODE=mock")
+    if get_settings().live_flights == "real":
+        raise NotImplementedError("Real flight provider not configured; set LIVE_FLIGHTS=mock")
     return cached(f"flight:{fn}:{date}", TTL["flight"], lambda: _mock(fn, date))

@@ -29,8 +29,8 @@ def status(trip_id: str):
             "fx": "Frankfurter"}
     return {"live_mode": mode, "llm_provider": s.llm_provider, "llm_configured": build_llm(s) is not None,
             "llm_limits": _llm_limits(s),
-            "integrations": [{"name": k, "provider": srcs[k] if mode == "real" and k != "flight" else "mock",
-                              "mode": "mock" if (mode == "mock" or k == "flight") else "real",
+            "integrations": [{"name": k, "provider": srcs[k] if (s.live_flights if k == "flight" else mode) == "real" else "mock",
+                              "mode": s.live_flights if k == "flight" else mode,
                               "last_contacted": last[k]} for k in srcs]}
 
 
