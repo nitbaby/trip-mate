@@ -126,7 +126,7 @@ async def run_agent(turn: Turn, llm, *, agent: str | None, system: str, allowed:
         if it == 0 and prefetch_docs and any(t["name"] == "search_docs" for t in tools):
             # Small models sometimes skip search_docs and answer from memory: search deterministically first.
             final = {"content": [{"type": "tool_use", "id": "prefetch_docs", "name": "search_docs",
-                                  "input": {"query": prefetch_docs}}], "stop_reason": "tool_use"}
+                                  "input": {"query": prefetch_docs}, "synthetic": True}], "stop_reason": "tool_use"}
         else:
             turn.llm_calls += 1
         forced = {"force_tool": force_first_tool} if it == 0 and force_first_tool and any(t["name"] == force_first_tool for t in tools) else {}

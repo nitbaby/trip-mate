@@ -187,3 +187,11 @@ def test_sanitize_keeps_a_parameter_named_title():
     out = sanitize_schema({"title": "Args", "type": "object", "required": ["title"],
                            "properties": {"title": {"title": "Title", "anyOf": [{"type": "string"}, {"type": "null"}], "default": None}}})
     assert out == {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+
+
+def test_app_made_tool_call_gets_a_dummy_gemini_signature_only_for_gemini():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "p1", "name": "search_docs", "input": {"query": "q"}, "synthetic": True}]}]
+    sig = {"google": {"thought_signature": "skip_thought_signature_validator"}}
+    assert to_openai_messages("S", msgs, gemini=True)[2]["tool_calls"][0]["extra_content"] == sig
+    assert "extra_content" not in to_openai_messages("S", msgs)[2]["tool_calls"][0]

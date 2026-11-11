@@ -60,7 +60,10 @@ def to_openai_tools(tools: list[dict]) -> list[dict]:
                                               "parameters": sanitize_schema(t["input_schema"])}} for t in tools]
 
 
-def to_openai_messages(system: str, messages: list[dict]) -> list[dict]:
+GEMINI_SKIP_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}  # documented dummy for injected calls
+
+
+def to_openai_messages(system: str, messages: list[dict], gemini: bool = False) -> list[dict]:
     out = [{"role": "system", "content": system}]
     for m in messages:
         c = m["content"]
@@ -75,6 +78,8 @@ def to_openai_messages(system: str, messages: list[dict]) -> list[dict]:
                             "function": {"name": b["name"], "arguments": json.dumps(b["input"])}}
                     if b.get("extra_content"):  # e.g. Gemini thought signatures must be echoed back
                         call["extra_content"] = b["extra_content"]
+                    elif b.get("synthetic") and gemini:  # a call the app made (not the model): Gemini 3 needs a signature anyway
+                        call["extra_content"] = GEMINI_SKIP_SIGNATURE
                     calls.append(call)
             msg = {"role": "assistant", "content": text or None}
             if calls:
@@ -177,7 +182,7 @@ class OpenAICompatLLM:
             try:
                 stream = await self.client.chat.completions.create(
                     model=self.model, max_tokens=self.max_tokens, temperature=0.2, stream=True,
-                    messages=to_openai_messages(system, messages), tools=to_openai_tools(tools) or openai.NOT_GIVEN,
+                    messages=to_openai_messages(system, messages, gemini=bool(self.reasoning_effort)), tools=to_openai_tools(tools) or openai.NOT_GIVEN,
                     reasoning_effort=self.reasoning_effort or openai.NOT_GIVEN,
                     tool_choice="required" if force_tool else openai.NOT_GIVEN)
                 async for chunk in stream:
@@ -231,6 +236,8 @@ class AnthropicLLM:
     async def turn(self, system: str, tools: list[dict], messages: list[dict],
                    force_tool: str | None = None) -> AsyncIterator[tuple[str, object]]:
         extra = {"tool_choice": {"type": "tool", "name": force_tool}} if force_tool else {}
+        messages = [{**m, "content": [{k: v for k, v in b.items() if k != "synthetic"} for b in m["content"]]}
+                    if isinstance(m["content"], list) else m for m in messages]  # Anthropic rejects unknown block fields
         try:
             async with self.client.messages.stream(model=self.model, max_tokens=self.max_tokens, system=system,
                                                    tools=tools, messages=messages, **extra) as stream:
