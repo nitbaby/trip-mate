@@ -25,11 +25,17 @@ class Settings(BaseSettings):
     embeddings: str = "onnx"  # onnx (Chroma MiniLM) | fastembed (HF) | hash (tests)
     tripmate_data_dir: Path = REPO_ROOT / "data"
     # retrieval confidence thresholds (cosine similarity, MiniLM); calibrated on samples/, re-tune with eval/ in Phase 6
-    conf_high: float = 0.45
+    conf_high: float = 0.40
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
     conf_sibling_margin: float = 0.10  # same-document chunks this far below conf_low are still returned
-    conf_low: float = 0.25     # below this nothing is returned and confidence is "none"
+    conf_low: float = 0.18     # below this nothing is returned and confidence is "none"
     agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
+    # When no routing rule matches a question, ask the LLM which specialists to use (one short extra request, only on a miss).
+    # Never used with LLM_PROVIDER=demo. Any failure falls back to the documents agent, the same as without it.
+    router_llm_fallback: bool = True
+    # When the word-overlap check rejects a citation, ask the LLM once whether the passage really supports it. It can only
+    # restore a citation (never remove one), and numbers must still match. Never used with LLM_PROVIDER=demo.
+    verifier_llm_rescue: bool = True
     # Rate limits for the LLM API. -1 = provider default (gemini: 12 requests/min [free tier allows 15], 500/day); 0 = unlimited.
     llm_timeout_seconds: float = 60.0  # read timeout per LLM request (a slow local model may need more, e.g. 180)
     llm_max_rpm: int = -1

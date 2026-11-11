@@ -2,8 +2,8 @@ import json
 import time
 
 import pytest
-from app.agent.router import route
-from app.agent.verify import verify_citations
+from app.agent.router import matched_any, parse_intents, route, widen_fallback
+from app.agent.verify import failed_claims, numbers_present, parse_verdicts, verify_citations
 
 from tests.fakes import ScriptedLLM
 from tests.test_agent import HOTEL, Q_HOTEL, RULES, types
@@ -36,6 +36,18 @@ def chat(client, tid, message, llm, cid=None):
     return events
 
 
+def test_verifier_marker_after_an_attribution_sentence_and_iso_dates():
+    """Found by the eval set: 'fact. This is based on the documents [1].' and '2026-11-30' vs '30 November 2026' were rejected."""
+    refs = {1: {"text": "Visitors may bring in 400 cigarettes and 3 bottles of alcohol (760 ml each) duty-free."},
+            2: {"text": "Departs: London Heathrow (LHR) Terminal 3, 30 November 2026, 6:00 PM"}}
+    ok = "You can bring in 3 bottles of alcohol (760 ml each) duty-free. This information is based on the customs rules in the documents [1]."
+    assert verify_citations(ok, refs) == {"1": True}
+    wrong = "You can bring in 5 bottles of alcohol (760 ml each) duty-free. This information is based on the customs rules in the documents [1]."
+    assert verify_citations(wrong, refs) == {"1": False}  # the previous sentence is checked too: a wrong number still fails
+    assert verify_citations("The flight departs on 2026-11-30 at 6:00 PM [2].", refs) == {"2": True}
+    assert verify_citations("The flight departs on 2026-11-29 at 6:00 PM [2].", refs) == {"2": False}
+
+
 # ---------- router ----------
 @pytest.mark.parametrize("q,expected", [
     ("What time is check-out, and does the hotel include breakfast?", ["docs"]),
@@ -47,6 +59,12 @@ def chat(client, tid, message, llm, cid=None):
     ("What's the weather in Tokyo and what's the check-out time?", ["docs", "live"]),
     ("hi", ["docs"]),
     ("What is the Wi-Fi password at the airport lounge?", ["docs"]),
+    # found by the eval set: "rain" used to match inside "trains", and guide/flight-document questions went to live only
+    ("When do the trains stop running at night?", ["docs"]),
+    ("Which terminal do I fly from at Heathrow?", ["docs", "live"]),
+    ("Any tips for eating vegetarian in Tokyo?", ["docs", "live"]),
+    ("How heavy can my checked bag be?", ["docs"]),
+    ("Will it rain tomorrow?", ["live"]),
 ])
 def test_router(q, expected):
     assert route(q) == expected
@@ -302,3 +320,131 @@ def test_live_answer_without_citations_has_no_document_confidence_badge(client, 
     llm = ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 1})]}, {"text": "Tokyo will be clear, 13C."}])
     ev = chat(client, trip, "What is the weather in Tokyo for my trip?", llm)  # "my" prefetches a docs search too
     assert "confidence" not in types(ev)
+
+
+def test_prefetch_query_for_my_hotel_looks_up_the_hotel_not_the_question():
+    from app.agent.loop import _prefetch
+    assert _prefetch("live", "Find a vegetarian restaurant near my hotel.") == ("search_docs", {"query": "hotel name and address"})
+    assert _prefetch("live", "Is my flight delayed?") == ("search_docs", {"query": "Is my flight delayed?"})
+    assert _prefetch("docs", "What time is check-out?") == ("search_docs", {"query": "What time is check-out?"})
+
+
+def test_answer_from_memory_without_support_gets_an_unverified_note(client, trip, monkeypatch):
+    """Found by the eval set: 'How much is the visa fee?' was answered from the model's memory with no source."""
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: ("search_docs", {"query": "zebra quantum submarine"}) if agent == "docs" else None)
+    invented = "The Japan tourist visa fee is approximately 1,500 yen for a single-entry visa valid for up to ninety days, depending on nationality."
+    ev = chat(client, trip, "What does Japan charge for a tourist visa?", ScriptedLLM([{"text": invented}]))
+    text = "".join(e.get("text", "") for e in ev if e["type"] == "token")
+    assert "Not found in your documents as written" in text and next(e for e in ev if e["type"] == "confidence")["level"] in ("low", "none")
+    honest = "I could not find the visa fee in your documents. Please check the embassy website for the current fee and the application steps."
+    ev = chat(client, trip, "What does Japan charge for a tourist visa?", ScriptedLLM([{"text": honest}]))
+    assert "Not found in your documents as written" not in "".join(e.get("text", "") for e in ev if e["type"] == "token")
+
+
+# ---------- router LLM fallback ----------
+@pytest.mark.parametrize("q,expected", [
+    ("What's the check-out time?", True), ("hi", False), ("what is my hotel address", True), ("Is it going to rain?", True),
+    ("Any coffee shops close to my hotel?", False),  # weak docs word + proximity phrase: let the LLM decide
+    ("anything around the hotel worth seeing", False),
+    ("Is my hotel room near the station?", True),  # no proximity phrase from the list: the weak word settles it
+    ("Is there a restaurant close to my hotel?", True),  # a strong live word still settles it by rule
+])
+def test_matched_any(q, expected):
+    assert matched_any(q) is expected
+
+
+def test_widen_fallback_only_touches_live_only():
+    assert widen_fallback(["live"]) == ["docs", "live"]
+    assert widen_fallback(["docs"]) == ["docs"] and widen_fallback(["itinerary"]) == ["itinerary"]
+    assert widen_fallback(["docs", "live"]) == ["docs", "live"]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ('{"intents": ["live"]}', ["live"]),
+    ('Sure! ```json\n{"intents": ["itinerary", "docs"]}\n```', ["docs", "itinerary"]),  # stable order, tolerant of wrapping
+    ('{"intents": ["live", "hacker"]}', ["live"]),  # unknown agents are dropped
+    ('{"intents": ["hacker"]}', ["docs"]),
+    ('{"intents": "live"}', ["docs"]),
+    ("I think live", ["docs"]),
+    ("", ["docs"]),
+    ("{not json}", ["docs"]),
+])
+def test_parse_intents(text, expected):
+    assert parse_intents(text) == expected
+
+
+@pytest.fixture
+def fallback_on(client, monkeypatch):
+    from app.config import get_settings
+    s = get_settings()
+    monkeypatch.setattr(s, "router_llm_fallback", True)
+    monkeypatch.setattr(s, "llm_provider", "gemini")
+
+
+BROLLY = "Will I need a brolly tomorrow?"  # no rule matches this paraphrase
+
+
+def test_fallback_routes_a_paraphrase_to_live_and_also_docs(client, trip, fallback_on, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    assert route(BROLLY) == ["docs"] and not matched_any(BROLLY)
+
+    class Dispatch:  # by system prompt, so the parallel specialists' order doesn't matter
+        def __init__(self):
+            self.calls = []
+            self.router = ScriptedLLM([{"text": '{"intents": ["live"]}'}])
+            self.docs = ScriptedLLM([{"text": "Not found in your documents."}])
+            self.live = ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 2})]}, {"text": "Bring one, it rains."}])
+            self.composer = ScriptedLLM([{"text": "Bring an umbrella."}])
+
+        async def turn(self, system, tools, messages):
+            self.calls.append(system[:30])
+            which = ("router" if "route questions" in system else "composer" if "COMPOSER" in system
+                     else "docs" if "documents agent" in system else "live")
+            async for x in getattr(self, which).turn(system, tools, messages):
+                yield x
+
+    llm = Dispatch()
+    ev = chat(client, trip, BROLLY, llm)
+    starts = [e["agent"] for e in ev if e["type"] == "agent_start"]
+    assert starts[0] == "router" and set(starts[1:3]) == {"docs", "live"} and starts[3] == "composer"
+    assert "get_weather" in [e["name"] for e in ev if e["type"] == "tool_start"]
+    assert llm.router.calls[0]["tools"] == []  # the router call has no tools
+
+
+def test_fallback_keeps_live_only_out_of_the_rule_path(client, trip):
+    assert route("Will it rain tomorrow?") == ["live"]  # a rule match is never widened
+
+
+@pytest.mark.parametrize("reply", [{"text": "no idea"}, {"raise": "llm"}])
+def test_fallback_failure_keeps_the_documents_default(client, trip, fallback_on, reply):
+    from app.agent.llm import LLMError
+    if reply.get("raise"):
+        reply = {"raise": LLMError("rate limited", True)}
+    llm = ScriptedLLM([reply, {"text": "Not found in your documents."}])
+    ev = chat(client, trip, BROLLY, llm)
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"] == ["router", "docs"]
+    assert ev[-1]["type"] == "done"
+
+
+def test_fallback_is_not_used_when_a_rule_matched(client, trip, fallback_on):
+    llm = ScriptedLLM([{"text": "Check-out is 11:00 AM [1]."}])
+    ev = chat(client, trip, "What time is check-out?", llm)
+    assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
+    assert ev[-1]["llmCalls"] == 1
+
+
+def test_fallback_is_off_for_the_demo_provider(client, trip, fallback_on, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "llm_provider", "demo")
+    llm = ScriptedLLM([{"text": "Not found in your documents."}])
+    ev = chat(client, trip, BROLLY, llm)
+    assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
+
+
+def test_fallback_sees_the_previous_question_for_follow_ups(client, trip, fallback_on):
+    chat(client, trip, "What's the weather in Tokyo?",
+         ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 1})]}, {"text": "Clear."}]), cid="c1")  # a rule matches
+    llm = ScriptedLLM([{"text": '{"intents": ["itinerary"]}'}, {"text": "Nothing else is planned."}])  # itinerary is not widened
+    chat(client, trip, "And tomorrow?", llm, cid="c1")
+    asked = llm.calls[0]["messages"][-1]["content"]
+    assert "Previous question: What's the weather in Tokyo?" in asked and "Latest message: And tomorrow?" in asked

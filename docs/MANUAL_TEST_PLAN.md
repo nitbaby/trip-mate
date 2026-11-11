@@ -118,7 +118,7 @@ Add `LIVE_MODE=real` to try real providers. `trip_id` is a real tool parameter h
 | G-13 | RAG report | masked by default; `--raw` shows what Chroma really stores (the index keeps raw text; masking happens on the way out) |
 
 ### 3.3 Retrieval and confidence
-Use `search_docs` (M-02) or the report's `--query`. Thresholds: high >= 0.45 (or >= 0.35 with a second hit from the same document), low >= 0.25, below = none.
+Use `search_docs` (M-02) or the report's `--query`. Thresholds: high >= 0.40 (or >= 0.35 with a second hit from the same document), low >= 0.18, below = none.
 
 | ID | Query | Expected top document | Expected confidence |
 |---|---|---|---|

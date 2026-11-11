@@ -88,7 +88,7 @@ flowchart TD
 ```
 
 Rules worth knowing:
-- Router intents: `docs`, `live`, `itinerary`. Rules only, no LLM call. Docs-strong words (check-out, rules, visa, medication, ...) always include the documents agent.
+- Router intents: `docs`, `live`, `itinerary`. Rules first, no LLM call. Only when no rule matches at all (`matched_any`), one short tool-less LLM call (`ROUTER_LLM_FALLBACK`, default on, never with the demo provider) picks the intents from the question plus the previous user turn; the reply is filtered to the three known agents and any failure keeps the documents-agent default. The UI shows it as a "router" agent step. Docs-strong words (check-out, rules, visa, medication, ...) always include the documents agent.
 - Every agent's prompt also lists the traveler's own itinerary (marked as *not a document*, never cited) so plan questions work even when routed elsewhere.
 - Prefetching and forcing exist because small local models sometimes skip a lookup or copy an earlier "not found" reply from the history; a fresh tool result is always in front of the model.
 - Budgets (6 tools per turn, 30 external lookups per conversation), `trip_id` injection and tool allowlists are enforced by the backend, not the model.
@@ -107,7 +107,7 @@ flowchart LR
   end
   subgraph Ask
     Qe["query"] --> Eq["embed"] --> Kn["top-k in Chroma, filtered by trip (and doc_type)"]
-    Kn --> Cf["confidence: score >= 0.45 high (or >= 0.35 + a second hit in the same doc),<br/>>= 0.25 low, else none"]
+    Kn --> Cf["confidence: score >= 0.40 high (or >= 0.35 + a second hit in the same doc),<br/>>= 0.18 low, else none"]
     Cf --> Sib["same-document sibling chunks within 0.10 below the low threshold are kept"]
     Sib --> Rd["redact sensitive values"] --> Nm["number passages [1] [2] ..."] --> Ag["agent answers with [n] markers"]
   end
@@ -149,6 +149,8 @@ Common behaviour: a process-wide per-minute limiter queues requests (a `waiting`
 |---|---|---|
 | `LLM_PROVIDER` | gemini / openai / anthropic / demo | which model backs the agents |
 | `AGENT_MODE` | multi / single | agent architecture (per-request `agentMode` overrides) |
+| `ROUTER_LLM_FALLBACK` | true / false | ask the LLM to route questions no rule matches (one extra request on a miss) |
+| `VERIFIER_LLM_RESCUE` | true / false | one batched LLM check of citations the word-overlap verifier rejected; it can only restore a citation, and every number/time in the statement must still appear in the passage |
 | `LIVE_MODE` | mock / real | fixtures vs Open-Meteo, Frankfurter, Nominatim |
 | `LIVE_FLIGHTS` | mock / real | flights stay mock even in real mode (no real provider; `real` fails clearly) |
 | `EMBEDDINGS` | onnx / fastembed / hash | embedder for ingestion and search |

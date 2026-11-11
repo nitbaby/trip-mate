@@ -20,8 +20,8 @@ from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
 from .ratelimit import quota_status
-from .router import ADD_REQUEST, AGENTS, route
-from .verify import verify_citations
+from .router import ADD_REQUEST, AGENTS, ROUTER_PROMPT, matched_any, parse_intents, route, widen_fallback
+from .verify import JUDGE_PROMPT, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
 
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
@@ -30,6 +30,10 @@ HISTORY_LIMIT = 20
 CHANGE_CLAIM = re.compile(r"\b(?:I(?:'ve|'ve| have)?\s+(?:added|scheduled|booked|removed|deleted|moved|updated|created)|"
                           r"(?:has|have) been (?:added|scheduled|booked|removed|deleted|moved|updated)|"
                           r"(?:added|scheduled|booked) (?:a |an |the )?\w*[^.\n]{0,40}(?:to|on|in) your (?:itinerary|schedule))", re.IGNORECASE)
+# the answer already says the information was not found (so no extra note is needed)
+NOT_FOUND = re.compile(r"not (found|available|provided|included|specified|mentioned|covered)|(could|can)(n't|not| not) find|couldn't|"
+                       r"unable to (find|locate)|no (information|mention|details)|(doesn't|does not|don't|do not|isn't|is not) "
+                       r"(say|mention|include|contain|specify|have|list|cover|provide)|don't have|do not have|general knowledge", re.IGNORECASE)
 RANK = {"none": 0, "low": 1, "high": 2}
 
 
@@ -283,14 +287,70 @@ def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
     """Lookups made before the model's first turn: documents for document questions (and live questions about
     'my ...'), the itinerary for plan questions (an 'add ...' request skips it: it goes straight to the write)."""
     if agent == "docs" or (agent == "live" and re.search(r"\bmy\b", message, re.IGNORECASE)):
+        if agent == "live" and re.search(r"\bmy (?:hotel|accommodation|stay)\b", message, re.IGNORECASE):
+            return "search_docs", {"query": "hotel name and address"}  # the question's own words would match guide text, not the booking
         return "search_docs", {"query": message}
     if agent == "itinerary" and not ADD_REQUEST.search(message):
         return "read_itinerary", {}
     return None
 
 
-async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    """Yields events, then finally {"type": "_intents", "intents": [...]} (internal, not sent to the client).
+    Rules first; the LLM is asked only when no rule matched. Any LLM failure keeps the rules' answer (documents agent)."""
     intents = route(user_message)
+    s = get_settings()
+    if not (s.router_llm_fallback and s.llm_provider != "demo" and not matched_any(user_message)):
+        yield {"type": "_intents", "intents": intents}
+        return
+    yield {"type": "agent_start", "agent": "router", "label": "Understanding the question"}
+    turn.llm_calls += 1
+    prev = next((m["content"] for m in reversed(history) if m["role"] == "user" and isinstance(m["content"], str)), None)
+    ask = f"Previous question: {prev}\n\nLatest message: {user_message}" if prev else f"Latest message: {user_message}"
+    text = ""
+    try:
+        async for kind, payload in llm.turn(ROUTER_PROMPT, [], [{"role": "user", "content": ask}]):
+            if kind == "wait":
+                yield {"type": "waiting", **payload, "agent": "router"}
+            elif kind == "text":
+                text += payload
+        intents = widen_fallback(parse_intents(text))
+    except LLMError:
+        pass  # the specialist call will report a real provider problem itself; routing just keeps the default
+    yield {"type": "agent_end", "agent": "router"}
+    yield {"type": "_intents", "intents": intents}
+
+
+async def _rescue(turn: Turn, llm, full_text: str, failed: list[str]) -> AsyncIterator[dict]:
+    """Rescue-only LLM check of citations the heuristic rejected. Yields events, then {"type": "_rescued", "markers": [...]}.
+    It can only restore a citation; if the call fails or the reply is unusable, the heuristic's verdict stands."""
+    claims = failed_claims(full_text, turn.refs, failed)
+    if not claims:
+        yield {"type": "_rescued", "markers": []}
+        return
+    yield {"type": "agent_start", "agent": "verifier", "label": "Double-checking sources"}
+    turn.llm_calls += 1
+    text = ""
+    try:
+        async for kind, payload in llm.turn(JUDGE_PROMPT, [], [{"role": "user", "content": judge_input(claims, turn.refs)}]):
+            if kind == "wait":
+                yield {"type": "waiting", **payload, "agent": "verifier"}
+            elif kind == "text":
+                text += payload
+    except LLMError:
+        text = ""
+    yield {"type": "agent_end", "agent": "verifier"}
+    ok = parse_verdicts(text, set(claims))
+    yield {"type": "_rescued", "markers": [m for m in claims if m in ok and numbers_present(claims[m], turn.refs[int(m)]["text"], turn.evidence)]}
+
+
+async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    intents: list[str] = ["docs"]
+    async for ev in _route(turn, llm, history, user_message):
+        if ev["type"] == "_intents":
+            intents = ev["intents"]
+        else:
+            yield ev
     msgs = [*history, {"role": "user", "content": user_message}]
     if len(intents) == 1:  # the specialist answers the user directly: no extra composer call
         a = intents[0]
@@ -360,6 +420,13 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         supported = cited
         if mode == "multi":
             grounded = verify_citations(full_text, turn.refs, turn.evidence)
+            failed = [m for m in cited if not grounded.get(m, False)]
+            if failed and s.verifier_llm_rescue and s.llm_provider != "demo":
+                async for ev in _rescue(turn, llm, full_text, failed):
+                    if ev["type"] == "_rescued":
+                        grounded = {**grounded, **{m: True for m in ev["markers"]}}
+                    else:
+                        yield ev
             supported = [m for m in cited if grounded.get(m, False)]
             if cited:
                 yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
@@ -372,6 +439,12 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             if level != "none" and not supported:
                 level = "low"  # CHAT-02: no (grounded) citation means no "high"
             yield {"type": "confidence", "level": level}
+            if level in ("low", "none") and not supported and len(full_text.strip()) > 80 and not NOT_FOUND.search(full_text):
+                # small models sometimes answer from memory when the search found nothing: say so, so it is not read as sourced
+                note = ("\n\n⚠️ Not found in your documents as written: treat this as unverified general knowledge and check an official source.")
+                turn.streamed += note
+                full_text += note
+                yield {"type": "token", "text": note}
         reason = verify_reason(user_message, full_text)
         if reason:
             yield {"type": "verify", "reason": reason}
