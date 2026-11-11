@@ -327,3 +327,15 @@ def test_prefetch_query_for_my_hotel_looks_up_the_hotel_not_the_question():
     assert _prefetch("live", "Find a vegetarian restaurant near my hotel.") == ("search_docs", {"query": "hotel name and address"})
     assert _prefetch("live", "Is my flight delayed?") == ("search_docs", {"query": "Is my flight delayed?"})
     assert _prefetch("docs", "What time is check-out?") == ("search_docs", {"query": "What time is check-out?"})
+
+
+def test_answer_from_memory_without_support_gets_a_not_from_documents_note(client, trip, monkeypatch):
+    """Found by the eval set: 'How much is the visa fee?' was answered from the model's memory with no source."""
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: ("search_docs", {"query": "zebra quantum submarine"}) if agent == "docs" else None)
+    invented = "The Japan tourist visa fee is approximately 1,500 yen for a single-entry visa valid for up to ninety days, depending on nationality."
+    ev = chat(client, trip, "What does Japan charge for a tourist visa?", ScriptedLLM([{"text": invented}]))
+    text = "".join(e.get("text", "") for e in ev if e["type"] == "token")
+    assert "not from your documents" in text and next(e for e in ev if e["type"] == "confidence")["level"] in ("low", "none")
+    honest = "I could not find the visa fee in your documents. Please check the embassy website for the current fee and the application steps."
+    ev = chat(client, trip, "What does Japan charge for a tourist visa?", ScriptedLLM([{"text": honest}]))
+    assert "not from your documents" not in "".join(e.get("text", "") for e in ev if e["type"] == "token")

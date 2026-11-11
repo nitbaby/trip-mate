@@ -30,6 +30,10 @@ HISTORY_LIMIT = 20
 CHANGE_CLAIM = re.compile(r"\b(?:I(?:'ve|'ve| have)?\s+(?:added|scheduled|booked|removed|deleted|moved|updated|created)|"
                           r"(?:has|have) been (?:added|scheduled|booked|removed|deleted|moved|updated)|"
                           r"(?:added|scheduled|booked) (?:a |an |the )?\w*[^.\n]{0,40}(?:to|on|in) your (?:itinerary|schedule))", re.IGNORECASE)
+# the answer already says the information was not found (so no extra note is needed)
+NOT_FOUND = re.compile(r"not (found|available|provided|included|specified|mentioned|covered)|(could|can)(n't|not| not) find|couldn't|"
+                       r"unable to (find|locate)|no (information|mention|details)|(doesn't|does not|don't|do not|isn't|is not) "
+                       r"(say|mention|include|contain|specify|have|list|cover|provide)|don't have|do not have|general knowledge", re.IGNORECASE)
 RANK = {"none": 0, "low": 1, "high": 2}
 
 
@@ -374,6 +378,13 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             if level != "none" and not supported:
                 level = "low"  # CHAT-02: no (grounded) citation means no "high"
             yield {"type": "confidence", "level": level}
+            if level in ("low", "none") and not supported and len(full_text.strip()) > 80 and not NOT_FOUND.search(full_text):
+                # small models sometimes answer from memory when the search found nothing: say so, so it is not read as sourced
+                note = ("\n\n⚠️ This is not from your documents (nothing matching was found there), so treat it as general knowledge "
+                        "and check an official source.")
+                turn.streamed += note
+                full_text += note
+                yield {"type": "token", "text": note}
         reason = verify_reason(user_message, full_text)
         if reason:
             yield {"type": "verify", "reason": reason}
