@@ -36,7 +36,8 @@ def search_docs(trip_id: str, query: str, doc_type: str | None = None) -> str:
 
 @mcp.tool()
 def read_itinerary(trip_id: str, date_from: str | None = None, date_to: str | None = None) -> str:
-    """Read itinerary items for a trip, optionally between ISO datetimes. Includes conflicts_with for overlaps."""
+    """Read itinerary items for a trip, optionally between two dates or ISO datetimes (a date-only date_to includes that whole day,
+    so date_from=date_to=2026-12-01 returns everything on Dec 1). Includes conflicts_with for overlaps."""
     return _run(impl.read_itinerary, trip_id, date_from, date_to)
 
 
