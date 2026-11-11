@@ -95,4 +95,8 @@ EVAL_LABEL ?= qwen3-8b
 eval:
 	$(PY)/python scripts/eval.py --label $(EVAL_LABEL)
 
-.PHONY: eval seed demo-reset demo-backend demo-web
+.PHONY: eval seed demo-reset demo-backend demo-web e2e
+
+# 5 browser flows (phone viewport, system Chrome) on the demo LLM; starts its own servers on :8010/:5180 with a temp data dir
+e2e:
+	cd e2e && PATH=$(NODE22):$$PATH npx playwright test

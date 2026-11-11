@@ -27,7 +27,7 @@ REFUSAL = re.compile(
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--url", default="http://localhost:8010")
-ap.add_argument("--only", help="substring of a case id or category")
+ap.add_argument("--only", help="comma-separated substrings of case ids or categories, e.g. hotel,live-delay")
 ap.add_argument("--label", default="run", help="name for this run (model), used in the result file name")
 ap.add_argument("--agent-mode", choices=["multi", "single"])
 ap.add_argument("--trip", help="reuse this trip instead of creating one (must have the sample documents)")
@@ -49,7 +49,8 @@ mock = health["live_mode"] == "mock"
 print(f"target {a.url}: llm_provider={health['llm_provider']} live_mode={health['live_mode']} label={a.label}")
 
 cases = json.loads((ROOT / "eval" / "questions.json").read_text())["cases"]
-cases = [k for k in cases if not a.only or a.only.lower() in k["id"].lower() or a.only.lower() in k["category"].lower()]
+only = [x.strip().lower() for x in (a.only or "").split(",") if x.strip()]
+cases = [k for k in cases if not only or any(x in k["id"].lower() or x in k["category"].lower() for x in only)]
 
 if a.trip:
     trip = a.trip
