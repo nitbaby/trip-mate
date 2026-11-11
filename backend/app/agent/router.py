@@ -2,6 +2,7 @@
 
 Order of the result is stable: docs, live, itinerary. Unmatched questions go to the docs agent, because
 the safest default is "look in the traveler's documents and admit if it isn't there"."""
+import json
 import re
 
 AGENTS = {
@@ -39,3 +40,42 @@ def route(message: str) -> list[str]:
     if itin:
         out.append("itinerary")
     return out
+
+
+# a weak docs word ("hotel") normally settles the route (docs), but with a proximity phrase the question is probably about places
+NEAR_HINT = re.compile(r"\b(?:close to|close by|next to|around|walking distance|short walk|nearest|closest)\b", re.IGNORECASE)
+
+
+def matched_any(message: str) -> bool:
+    """True when a rule settles the route. A total miss, or only a weak docs word next to a proximity phrase
+    ("coffee shops close to my hotel"), is the only case the optional LLM fallback is asked about."""
+    if any(p.search(message) for p in (LIVE, ITIN, ADD_REQUEST, DOCS_STRONG)):
+        return True
+    return bool(DOCS_WEAK.search(message)) and not NEAR_HINT.search(message)
+
+
+ROUTER_PROMPT = """You route questions for a travel assistant. Decide which specialists are needed to answer the traveler's latest message.
+- "docs": the traveler's own documents and the travel guide: hotel, flights, bookings, rules, visas, customs, etiquette, tipping, local practices, transport and safety tips, emergency numbers.
+- "live": only current, changing information: weather, flight status, nearby places or food, currency conversion.
+- "itinerary": reading or changing the traveler's day-by-day plan.
+Questions about how things normally work or what is customary are "docs", not "live". Choose only what is needed. If unsure, answer docs.
+Reply with JSON only, for example {"intents": ["live"]}."""
+
+
+def widen_fallback(intents: list[str]) -> list[str]:
+    """A live-only answer from the LLM fallback also gets the documents agent: a mis-route to live (e.g. a tipping question)
+    would otherwise never look in the documents. Used only for fallback routes, never for rule matches."""
+    return ["docs", "live"] if intents == ["live"] else intents
+
+
+def parse_intents(text: str) -> list[str]:
+    """Model reply -> intents in the stable order docs, live, itinerary. Anything unusable -> ["docs"] (the rules' own default)."""
+    m = re.search(r"\{.*\}", text or "", re.DOTALL)
+    try:
+        data = json.loads(m.group(0)) if m else {}
+        wanted = data.get("intents") if isinstance(data, dict) else None
+    except ValueError:
+        wanted = None
+    if not isinstance(wanted, list):
+        return ["docs"]
+    return [a for a in AGENTS if a in wanted] or ["docs"]  # allowlist: the model can't invent an agent

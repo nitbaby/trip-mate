@@ -134,7 +134,9 @@ Playwright E2E (`e2e/`, system Chrome via `channel: "chrome"`, phone viewport) f
 - **Gemini is unblocked:** re-run the 6 demo questions on `gemini-3.5-flash-lite` (own backend :8010, real onnx embeddings, `samples/`), then `compare_modes.py --yes`. Confirm tool use on the lite model for medication, places, itinerary add and not-found (not yet seen).
 - ~~Rate-limit handling~~ **DONE** (see Phase 4d below). Still to verify in a browser: the amber "Waiting for the assistant's rate limit" banner in the chat UI (covered by reducer tests and a live CLI run, not yet screenshotted).
 - Push to GitHub once the account issue is resolved.
-- Map screen (stretch, cut), real flight provider (optional), LLM-based verifier layer (optional), router LLM fallback (optional).
+- Map screen (stretch, cut), real flight provider (optional).
+- DONE (needs a real-LLM check): verifier LLM rescue (`VERIFIER_LLM_RESCUE`, rescue-only: restores a rejected citation, never removes one; scripted-LLM tests; its own effect on citations is not yet isolated in an eval).
+- DONE (needs a real-LLM check): router LLM fallback (`ROUTER_LLM_FALLBACK`, paraphrase eval on Qwen3-8B: 4/11 off, 8/11 on, see docs/EVAL.md; not yet measured on Gemini; after prompt tightening + live-only widening + proximity phrase: still 8/11, with live questions (jacket, coffee shops) now sometimes routed to docs; prompt needs a better balance, ideally measured on more than 11 questions).
 
 ---
 

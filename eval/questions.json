@@ -404,6 +404,106 @@
     "title": "teamlab",
     "start": "2026-12-03T14:00"
    }
+  },
+  {
+   "id": "para-brolly",
+   "category": "paraphrase",
+   "question": "Will I need a brolly in Tokyo tomorrow?",
+   "tools_any": [
+    "get_weather"
+   ]
+  },
+  {
+   "id": "para-jacket",
+   "category": "paraphrase",
+   "question": "Should I pack a jacket for Tokyo this week?",
+   "tools_any": [
+    "get_weather"
+   ]
+  },
+  {
+   "id": "para-yen",
+   "category": "paraphrase",
+   "question": "How many yen would 50 bucks get me?",
+   "tools_any": [
+    "convert_currency"
+   ],
+   "all": [
+    "7550|7,550"
+   ],
+   "mock_only": true
+  },
+  {
+   "id": "para-sushi",
+   "category": "paraphrase",
+   "question": "Is there a decent sushi place around here?",
+   "tools_any": [
+    "search_places"
+   ]
+  },
+  {
+   "id": "para-coffee",
+   "category": "paraphrase",
+   "question": "Any coffee shops close to my hotel?",
+   "tools_any": [
+    "search_places"
+   ]
+  },
+  {
+   "id": "para-vacate",
+   "category": "paraphrase",
+   "question": "When do I need to vacate my room?",
+   "all": [
+    "11:00|11 am|11am"
+   ],
+   "cite": "hotel"
+  },
+  {
+   "id": "para-meal",
+   "category": "paraphrase",
+   "question": "Until what hour is the morning meal served?",
+   "all": [
+    "10:00|10 am|10am"
+   ],
+   "cite": "hotel"
+  },
+  {
+   "id": "para-suitcase",
+   "category": "paraphrase",
+   "question": "Can I leave my suitcases with the front desk after I leave the hotel?",
+   "all": [
+    "no charge|free|at no|no cost|yes"
+   ],
+   "cite": "hotel"
+  },
+  {
+   "id": "para-trouble",
+   "category": "paraphrase",
+   "question": "Who do I call if I get into trouble?",
+   "all": [
+    "110|119"
+   ],
+   "cite": "tokyo"
+  },
+  {
+   "id": "para-gratuity",
+   "category": "paraphrase",
+   "question": "Do I need to leave extra money for waiters?",
+   "all": [
+    "not customary|isn't customary|not expected|no need"
+   ],
+   "cite": "tokyo"
+  },
+  {
+   "id": "para-lined-up",
+   "category": "paraphrase",
+   "question": "What have I got lined up for 1 December?",
+   "tools_any": [
+    "read_itinerary"
+   ],
+   "all": [
+    "garden"
+   ]
   }
  ]
 }

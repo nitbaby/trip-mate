@@ -20,8 +20,8 @@ from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
 from .ratelimit import quota_status
-from .router import ADD_REQUEST, AGENTS, route
-from .verify import verify_citations
+from .router import ADD_REQUEST, AGENTS, ROUTER_PROMPT, matched_any, parse_intents, route, widen_fallback
+from .verify import JUDGE_PROMPT, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
 
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
@@ -295,8 +295,62 @@ def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
     return None
 
 
-async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    """Yields events, then finally {"type": "_intents", "intents": [...]} (internal, not sent to the client).
+    Rules first; the LLM is asked only when no rule matched. Any LLM failure keeps the rules' answer (documents agent)."""
     intents = route(user_message)
+    s = get_settings()
+    if not (s.router_llm_fallback and s.llm_provider != "demo" and not matched_any(user_message)):
+        yield {"type": "_intents", "intents": intents}
+        return
+    yield {"type": "agent_start", "agent": "router", "label": "Understanding the question"}
+    turn.llm_calls += 1
+    prev = next((m["content"] for m in reversed(history) if m["role"] == "user" and isinstance(m["content"], str)), None)
+    ask = f"Previous question: {prev}\n\nLatest message: {user_message}" if prev else f"Latest message: {user_message}"
+    text = ""
+    try:
+        async for kind, payload in llm.turn(ROUTER_PROMPT, [], [{"role": "user", "content": ask}]):
+            if kind == "wait":
+                yield {"type": "waiting", **payload, "agent": "router"}
+            elif kind == "text":
+                text += payload
+        intents = widen_fallback(parse_intents(text))
+    except LLMError:
+        pass  # the specialist call will report a real provider problem itself; routing just keeps the default
+    yield {"type": "agent_end", "agent": "router"}
+    yield {"type": "_intents", "intents": intents}
+
+
+async def _rescue(turn: Turn, llm, full_text: str, failed: list[str]) -> AsyncIterator[dict]:
+    """Rescue-only LLM check of citations the heuristic rejected. Yields events, then {"type": "_rescued", "markers": [...]}.
+    It can only restore a citation; if the call fails or the reply is unusable, the heuristic's verdict stands."""
+    claims = failed_claims(full_text, turn.refs, failed)
+    if not claims:
+        yield {"type": "_rescued", "markers": []}
+        return
+    yield {"type": "agent_start", "agent": "verifier", "label": "Double-checking sources"}
+    turn.llm_calls += 1
+    text = ""
+    try:
+        async for kind, payload in llm.turn(JUDGE_PROMPT, [], [{"role": "user", "content": judge_input(claims, turn.refs)}]):
+            if kind == "wait":
+                yield {"type": "waiting", **payload, "agent": "verifier"}
+            elif kind == "text":
+                text += payload
+    except LLMError:
+        text = ""
+    yield {"type": "agent_end", "agent": "verifier"}
+    ok = parse_verdicts(text, set(claims))
+    yield {"type": "_rescued", "markers": [m for m in claims if m in ok and numbers_present(claims[m], turn.refs[int(m)]["text"], turn.evidence)]}
+
+
+async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
+    intents: list[str] = ["docs"]
+    async for ev in _route(turn, llm, history, user_message):
+        if ev["type"] == "_intents":
+            intents = ev["intents"]
+        else:
+            yield ev
     msgs = [*history, {"role": "user", "content": user_message}]
     if len(intents) == 1:  # the specialist answers the user directly: no extra composer call
         a = intents[0]
@@ -366,6 +420,13 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
         supported = cited
         if mode == "multi":
             grounded = verify_citations(full_text, turn.refs, turn.evidence)
+            failed = [m for m in cited if not grounded.get(m, False)]
+            if failed and s.verifier_llm_rescue and s.llm_provider != "demo":
+                async for ev in _rescue(turn, llm, full_text, failed):
+                    if ev["type"] == "_rescued":
+                        grounded = {**grounded, **{m: True for m in ev["markers"]}}
+                    else:
+                        yield ev
             supported = [m for m in cited if grounded.get(m, False)]
             if cited:
                 yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
