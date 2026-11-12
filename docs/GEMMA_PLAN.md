@@ -1,6 +1,6 @@
 # Gemma 4 12B as a local model: validation plan
 
-Status (2026-11-12): **downloaded, nothing run yet.** Goal: find out whether Gemma 4 12B Q4_K_M works as a local model in this app (tool calling in multi mode), and whether it beats or matches Qwen3-8B (the current local default). Read `docs/PLAN.md` first (rules in section 2 apply: never read `.env`, test on :8010/:5180, don't touch user data, say exactly what was verified).
+Status (2026-11-12): **steps 1-5 done; results and next steps are in `docs/MODEL_COMPARE_PLAN.md`** (tool calling works with thinking off; eval 51/56 twice). Goal: find out whether Gemma 4 12B Q4_K_M works as a local model in this app (tool calling in multi mode), and whether it beats or matches Qwen3-8B (the current local default). Read `docs/PLAN.md` first (rules in section 2 apply: never read `.env`, test on :8010/:5180, don't touch user data, say exactly what was verified).
 
 ## What is known
 - File: `models/gemma4-12b/gemma-4-12b-it-Q4_K_M.gguf` (7,121,861,440 bytes) from ModelScope `unsloth/gemma-4-12b-it-GGUF`. Other ModelScope repos with the same model: `bartowski/gemma-4-12b-it-GGUF` (Q4_K_M 7.66 GB), `ggml-org/`, `lmstudio-community/`, `AtomicChat/` (`gemma-4-12b-it-GGUF`). File integrity (loads in llama-server) **not yet checked**.
