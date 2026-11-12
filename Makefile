@@ -34,8 +34,8 @@ dev-backend-demo:
 
 # Local open-weight model (no cloud LLM, no key, nothing leaves the machine).
 # Needs: brew install llama.cpp ; .venv/bin/pip install -e "backend[local]"   (then make local-model, make local-llm)
-# If modelscope fails with CERTIFICATE_VERIFY_FAILED (corporate TLS inspection), point it at a CA bundle:
-#   make local-model CA_BUNDLE=/path/to/ca.pem   (system certs + your company root certificate in one PEM file)
+# If modelscope fails with CERTIFICATE_VERIFY_FAILED (e.g. CURL_CA_BUNDLE in your shell points at a company-only root), use the repo bundle:
+#   make local-model CA_BUNDLE=ca.pem   (ca.pem = public macOS system roots; it sets SSL_CERT_FILE and REQUESTS_CA_BUNDLE)
 CA_BUNDLE ?=
 # Which local model: qwen3 (default, best so far) or llama31 (Llama 3.1 8B Instruct). PORT: where llama-server listens.
 LOCAL_MODEL ?= qwen3
