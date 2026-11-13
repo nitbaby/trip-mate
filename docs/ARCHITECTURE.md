@@ -1,6 +1,6 @@
 # TripMate architecture
 
-Last reviewed against the code: 2026-11-11 (commit after `ced191b`). Diagrams are Mermaid: they render on GitHub and in VS Code (Markdown preview with a Mermaid extension).
+Last reviewed against the code: 2026-11-13. Diagrams are Mermaid: they render on GitHub and in VS Code (Markdown preview with a Mermaid extension).
 Where this document and the code disagree, the code wins; fix the document.
 
 ## 1. Block diagram: all components
@@ -14,8 +14,20 @@ flowchart TB
     Ingest["<b>Ingestion pipeline</b> (background task per upload)<br/>parse PDF/TXT/MD → chunk ~450 chars → classify + key facts + mask<br/>→ embed (ONNX MiniLM, local)"]
     subgraph Runtime["<b>Agent runtime</b>"]
       direction LR
-      Router["<b>Router</b><br/>rules, no LLM call"] --> Spec["<b>Specialists</b> (prompt + tool allowlist each)<br/>Documents · Live info · Itinerary"]
-      Spec --> Agg["<b>Composer (aggregator)</b><br/>merges answers"] --> Ver["<b>Verifier</b><br/>citations, confidence,<br/>verify badge"]
+      Router["<b>Router</b><br/>rules, no LLM call<br/>(LLM fallback if no rule matches)"]
+      subgraph Spec["<b>Specialist agents</b> (own prompt + tool allowlist, run in parallel when several match)"]
+        direction TB
+        SD["<b>Documents agent</b><br/>tools: search_docs"]
+        SL["<b>Live info agent</b><br/>tools: search_docs, get_flight_status,<br/>get_weather, search_places, convert_currency"]
+        SI["<b>Itinerary agent</b><br/>tools: read_itinerary, write_itinerary"]
+      end
+      Agg["<b>Composer (aggregator)</b><br/>merges answers (several intents only)"]
+      Ver["<b>Verifier</b><br/>citations, confidence,<br/>verify badge"]
+      Router --> SD & SL & SI
+      SD & SL & SI --> Agg --> Ver
+      SD -.->|"single intent: streams directly"| Ver
+      SL -.-> Ver
+      SI -.-> Ver
     end
     Guard["<b>Guardrails + MCP client</b><br/>trip_id injection · 6 tools/turn · 30 external calls/chat<br/>redaction · one long-lived tool subprocess"]
     LLMA["<b>LLM adapters</b><br/>OpenAI-compatible · Anthropic · demo stand-in<br/>rate limiter · retry · daily budget"]
