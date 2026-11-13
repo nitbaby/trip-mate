@@ -65,6 +65,10 @@ flowchart TB
   T2 --> SQL
   T3 --> SQL
   T3 --> LIVE
+
+  %% Edges 7-9 are the three "single intent" specialist -> Verifier edges.
+  %% GitHub's renderer drops the dotted style on one of them, so force it.
+  linkStyle 7,8,9 stroke-dasharray:4 4
 ```
 
 Reading the diagram:
