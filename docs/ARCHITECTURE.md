@@ -25,9 +25,7 @@ flowchart TB
       Ver["<b>Verifier</b><br/>citations, confidence,<br/>verify badge"]
       Router --> SD & SL & SI
       SD & SL & SI --> Agg --> Ver
-      SD -.->|"single intent: streams directly"| Ver
-      SL -.-> Ver
-      SI -.-> Ver
+      SD & SL & SI -.->|"single intent: streams directly"| Ver
     end
     Guard["<b>Guardrails + MCP client</b><br/>trip_id injection · 6 tools/turn · 30 external calls/chat<br/>redaction · one long-lived tool subprocess"]
     LLMA["<b>LLM adapters</b><br/>OpenAI-compatible · Anthropic · demo stand-in<br/>rate limiter · retry · daily budget"]
@@ -72,6 +70,7 @@ flowchart TB
 Reading the diagram:
 - **The browser only talks to the REST/SSE layer.** Everything the model can do goes through the guardrails and the MCP tool server. The agent code reads only the chat history and the traveler's itinerary list directly (to put them in the prompt); it never reads the vector store.
 - **One backend process plus one subprocess.** The FastAPI app contains the ingestion task and the agent runtime and spawns the MCP tool server over stdio. SQLite and Chroma are files on disk; there are no database servers.
+- **Solid vs dotted arrows (specialists):** solid arrows go through the Composer (several intents matched); dotted arrows skip it and stream straight to the Verifier (single intent).
 - **Agent internals** (prefetch, forced write, parallel specialists, verification) are in section 2.
 - **Not built:** offline PWA (service worker, local cache), map screen, real flight provider. Settings still shows "offline not enabled".
 
