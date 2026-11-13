@@ -20,7 +20,7 @@ make test && make test-web
 Runs Qwen3-8B (Q4_K_M, ~5 GB, about 6 GB of RAM) with llama.cpp on an Apple-silicon or similar machine with 16 GB RAM. Nothing leaves your machine and there are no rate limits.
 ```
 brew install llama.cpp && .venv/bin/pip install -e "backend[local]"
-make local-model      # downloads from ModelScope (~5 GB). Behind a TLS-inspecting proxy: make local-model CA_BUNDLE=/path/to/ca.pem
+make local-model      # downloads from ModelScope (~5 GB). If it fails with a certificate error: make local-model CA_BUNDLE=ca.pem (repo file with public root certificates; also fixes shells where CURL_CA_BUNDLE points at a company-only root)
 make local-llm        # serves http://localhost:8080/v1 (leave it running)
 ```
 Then set these in `.env` and restart the backend:

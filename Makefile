@@ -34,10 +34,10 @@ dev-backend-demo:
 
 # Local open-weight model (no cloud LLM, no key, nothing leaves the machine).
 # Needs: brew install llama.cpp ; .venv/bin/pip install -e "backend[local]"   (then make local-model, make local-llm)
-# If modelscope fails with CERTIFICATE_VERIFY_FAILED (corporate TLS inspection), point it at a CA bundle:
-#   make local-model CA_BUNDLE=/path/to/ca.pem   (system certs + your company root certificate in one PEM file)
+# If modelscope fails with CERTIFICATE_VERIFY_FAILED (e.g. CURL_CA_BUNDLE in your shell points at a company-only root), use the repo bundle:
+#   make local-model CA_BUNDLE=ca.pem   (ca.pem = public macOS system roots; it sets SSL_CERT_FILE and REQUESTS_CA_BUNDLE)
 CA_BUNDLE ?=
-# Which local model: qwen3 (default, best so far) or llama31 (Llama 3.1 8B Instruct). PORT: where llama-server listens.
+# Which local model: qwen3 (default, best so far), llama31 (Llama 3.1 8B Instruct) or gemma4 (Gemma 4 12B, ~8 GB RAM). PORT: where llama-server listens.
 LOCAL_MODEL ?= qwen3
 PORT ?= 8080
 ifeq ($(LOCAL_MODEL),llama31)
@@ -46,6 +46,13 @@ ifeq ($(LOCAL_MODEL),llama31)
   MODEL_DIR = models/llama31-8b
   MODEL_ALIAS = llama3.1-8b
   MODEL_ARGS =
+else ifeq ($(LOCAL_MODEL),gemma4)
+  MODEL_REPO = unsloth/gemma-4-12b-it-GGUF
+  MODEL_FILE = gemma-4-12b-it-Q4_K_M.gguf
+  MODEL_DIR = models/gemma4-12b
+  MODEL_ALIAS = gemma4-12b
+  # Gemma 4 thinks by default (reasoning_content, very slow): answer directly
+  MODEL_ARGS = --chat-template-kwargs '{"enable_thinking":false}'
 else
   MODEL_REPO = Qwen/Qwen3-8B-GGUF
   MODEL_FILE = Qwen3-8B-Q4_K_M.gguf
@@ -55,7 +62,7 @@ else
   MODEL_ARGS = --chat-template-kwargs '{"enable_thinking":false}'
 endif
 
-# make local-model [LOCAL_MODEL=llama31]
+# make local-model [LOCAL_MODEL=llama31|gemma4]
 local-model:
 	$(if $(CA_BUNDLE),SSL_CERT_FILE=$(CA_BUNDLE) REQUESTS_CA_BUNDLE=$(CA_BUNDLE) )$(PY)/modelscope download --model $(MODEL_REPO) --include "$(MODEL_FILE)" --local_dir $(MODEL_DIR)
 
@@ -73,7 +80,7 @@ DEMO_LLM ?= local
 ifeq ($(DEMO_LLM),demo)
   DEMO_ENV = LLM_PROVIDER=demo
 else
-  DEMO_ENV = LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:8080/v1 LLM_MODEL=qwen3-8b LLM_API_KEY=local LLM_TIMEOUT_SECONDS=300
+  DEMO_ENV = LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:$(PORT)/v1 LLM_MODEL=$(MODEL_ALIAS) LLM_API_KEY=local LLM_TIMEOUT_SECONDS=300
 endif
 
 # make demo-reset demo-backend   (then in other terminals: make demo-web, make seed)
