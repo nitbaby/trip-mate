@@ -153,6 +153,32 @@ def test_factory_selection():
     assert Settings(_env_file=None).llm_provider == "gemini"  # Gemini is the default
 
 
+def test_extra_headers_setting_is_parsed_and_sent():
+    from app.agent.llm import parse_extra_headers
+
+    assert parse_extra_headers("") == {}
+    assert parse_extra_headers('{"x-bf-vk": "secret"}') == {"x-bf-vk": "secret"}
+    for bad in ("not json", "[1]", '{"a": 1}'):
+        with pytest.raises(ValueError) as e:
+            parse_extra_headers(bad)
+        assert bad not in str(e.value)  # never echo the value: it may hold a key
+
+    seen = {}
+
+    def handler(req):
+        seen.update(req.headers)
+        return httpx.Response(200, json={"data": []})
+
+    s = Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="vllm/mistralai/Mistral-7B-Instruct-v0.3",
+                 llm_base_url="http://gw.example/v1", llm_extra_headers='{"x-bf-vk": "secret"}')
+    llm = build_llm(s)
+    llm.client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    import asyncio
+
+    asyncio.run(llm.client.get("/models", cast_to=object))
+    assert seen["x-bf-vk"] == "secret"
+
+
 def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
     """Mock Gemini asks for get_flight_status, then answers using the tool result."""
     from tests.test_agent import chat

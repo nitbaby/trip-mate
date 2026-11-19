@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""      # for llm_provider=openai
     llm_model: str = ""
     llm_base_url: str = ""
+    llm_extra_headers: str = ""  # JSON object of extra request headers for llm_provider=openai, e.g. a gateway key {"x-bf-vk": "..."}
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5-5"
     live_mode: str = "mock"  # mock | real

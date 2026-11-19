@@ -95,9 +95,10 @@ class OpenAICompatLLM:
     def __init__(self, api_key: str, model: str, base_url: str, max_tokens: int = 2048,
                  http_client: httpx.AsyncClient | None = None, provider_name: str = "LLM",
                  reasoning_effort: str | None = None, limits: Limits | None = None, sleep=asyncio.sleep,
-                 read_timeout: float = 60.0):
+                 read_timeout: float = 60.0, extra_headers: dict[str, str] | None = None):
         # default SDK timeout is 10 minutes; a stalled free-tier request must not freeze the chat
         self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, http_client=http_client, max_retries=0,  # we retry ourselves so waits are visible and counted
+                                         default_headers=extra_headers or None,  # e.g. a gateway key such as x-bf-vk
                                          timeout=httpx.Timeout(read_timeout, connect=10.0))
         self.model, self.max_tokens, self.provider = model, max_tokens, provider_name
         self.reasoning_effort = reasoning_effort
@@ -270,6 +271,19 @@ def missing_key_message(s: Settings) -> str:
     return f"{name} is not set. Add it to .env and restart."
 
 
+def parse_extra_headers(raw: str) -> dict[str, str]:
+    """LLM_EXTRA_HEADERS is a JSON object, e.g. {"x-bf-vk": "..."}. Bad JSON fails loudly at startup, without echoing the value."""
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise ValueError("LLM_EXTRA_HEADERS must be a JSON object, e.g. {\"x-bf-vk\": \"...\"}") from None
+    if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+        raise ValueError("LLM_EXTRA_HEADERS must be a JSON object of string names to string values")
+    return data
+
+
 def build_llm(s: Settings):
     """Return the configured LLM adapter, or None when it is not configured."""
     if s.llm_provider == "demo":  # deterministic stand-in for tests/demos (see demo_llm.py)
@@ -281,7 +295,8 @@ def build_llm(s: Settings):
                                reasoning_effort=s.gemini_reasoning_effort or None, limits=resolve_limits(s))
     if s.llm_provider == "openai" and s.llm_api_key and s.llm_model and s.llm_base_url:
         return OpenAICompatLLM(s.llm_api_key, s.llm_model, s.llm_base_url, provider_name="The LLM provider",
-                               limits=resolve_limits(s), read_timeout=s.llm_timeout_seconds)
+                               limits=resolve_limits(s), read_timeout=s.llm_timeout_seconds,
+                               extra_headers=parse_extra_headers(s.llm_extra_headers))
     if s.llm_provider == "anthropic" and s.anthropic_api_key:
         return AnthropicLLM(s.anthropic_api_key, s.anthropic_model)
     return None
