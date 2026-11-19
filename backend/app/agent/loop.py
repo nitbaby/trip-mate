@@ -297,10 +297,11 @@ def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
 
 async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
     """Yields events, then finally {"type": "_intents", "intents": [...]} (internal, not sent to the client).
-    Rules first; the LLM is asked only when no rule matched. Any LLM failure keeps the rules' answer (documents agent)."""
+    Rules first; the LLM is asked only when no rule matched (ROUTER_MODE=llm: asked every time). Any LLM failure keeps the rules' answer."""
     intents = route(user_message)
     s = get_settings()
-    if not (s.router_llm_fallback and s.llm_provider != "demo" and not matched_any(user_message)):
+    always = s.router_mode == "llm"
+    if s.llm_provider == "demo" or not (always or (s.router_llm_fallback and not matched_any(user_message))):
         yield {"type": "_intents", "intents": intents}
         return
     yield {"type": "agent_start", "agent": "router", "label": "Understanding the question"}
@@ -314,7 +315,8 @@ async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> Asy
                 yield {"type": "waiting", **payload, "agent": "router"}
             elif kind == "text":
                 text += payload
-        intents = widen_fallback(parse_intents(text))
+        if not always or re.search(r"\{.*\}", text, re.DOTALL):  # in llm mode an unusable reply keeps the rules' route
+            intents = widen_fallback(parse_intents(text))
     except LLMError:
         pass  # the specialist call will report a real provider problem itself; routing just keeps the default
     yield {"type": "agent_end", "agent": "router"}

@@ -476,6 +476,56 @@ def test_fallback_is_off_for_the_demo_provider(client, trip, fallback_on, monkey
     assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
 
 
+@pytest.fixture
+def llm_router(client, monkeypatch):
+    from app.config import get_settings
+    s = get_settings()
+    monkeypatch.setattr(s, "router_mode", "llm")
+    monkeypatch.setattr(s, "llm_provider", "gemini")
+
+
+def test_llm_router_mode_asks_the_llm_even_when_a_rule_matches(client, trip, llm_router, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    assert matched_any("What time is check-out?") and route("What time is check-out?") == ["docs"]
+    llm = ScriptedLLM([{"text": '{"intents": ["docs"]}'}, {"text": "Check-out is 11:00 AM [1]."}])
+    ev = chat(client, trip, "What time is check-out?", llm)
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "docs"]
+    assert "route questions" in llm.calls[0]["system"] and llm.calls[0]["tools"] == []
+    assert ev[-1]["llmCalls"] == 2  # one extra request for the router
+
+
+def test_llm_router_mode_overrides_the_rules(client, trip, llm_router):
+    """The rules say live for 'rain'; the LLM says itinerary: the LLM wins (and a live-only answer is still widened, as in the fallback)."""
+    assert route("Will it rain on my day trip?") == ["live"]
+    llm = ScriptedLLM([{"text": '{"intents": ["itinerary"]}'}, {"text": "You have nothing planned."}])
+    ev = chat(client, trip, "Will it rain on my day trip?", llm)
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "itinerary"]
+
+
+@pytest.mark.parametrize("reply", [{"text": "no idea"}, {"raise": "llm"}])
+def test_llm_router_mode_failure_keeps_the_rule_route(client, trip, llm_router, reply):
+    from app.agent.llm import LLMError
+    if reply.get("raise"):
+        reply = {"raise": LLMError("rate limited", True)}
+    llm = ScriptedLLM([reply, {"text": "Clear and mild."}])
+    ev = chat(client, trip, "What's the weather in Tokyo?", llm)  # rules: live; an unusable reply must not demote it to docs
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "live"]
+
+
+def test_default_router_mode_is_llm(client, monkeypatch):
+    from app.config import Settings
+    monkeypatch.delenv("ROUTER_MODE")  # the test fixture pins "rules"; this is the shipped default
+    assert Settings(_env_file=None).router_mode == "llm"
+
+
+def test_demo_provider_always_uses_the_rules_even_in_llm_mode(client, trip, llm_router, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "llm_provider", "demo")
+    llm = ScriptedLLM([{"text": "Not found in your documents."}])
+    ev = chat(client, trip, "What's the weather in Tokyo?", llm)
+    assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
+
+
 def test_fallback_sees_the_previous_question_for_follow_ups(client, trip, fallback_on):
     chat(client, trip, "What's the weather in Tokyo?",
          ScriptedLLM([{"tools": [("get_weather", {"location": "Tokyo", "days": 1})]}, {"text": "Clear."}]), cid="c1")  # a rule matches

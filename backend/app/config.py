@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # When no routing rule matches a question, ask the LLM which specialists to use (one short extra request, only on a miss).
     # Never used with LLM_PROVIDER=demo. Any failure falls back to the documents agent, the same as without it.
     router_llm_fallback: bool = True
+    # llm (default): the LLM routes EVERY question (one short extra request); the rule route is kept only if that request fails or
+    # returns nothing usable. rules: the rule router decides and the LLM is asked only on a miss (see above). The demo provider
+    # has no model to ask, so it always uses the rules.
+    router_mode: str = "llm"
     # When the word-overlap check rejects a citation, ask the LLM once whether the passage really supports it. It can only
     # restore a citation (never remove one), and numbers must still match. Never used with LLM_PROVIDER=demo.
     verifier_llm_rescue: bool = True
