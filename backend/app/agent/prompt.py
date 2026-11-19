@@ -86,7 +86,8 @@ ROLE_RULES = {
 1. Only change the itinerary (write_itinerary) when the traveler asks. Use ISO 8601 local times without a timezone offset, e.g. 2026-12-02T20:00:00. A create always needs type, title and start_at.
 2. Only say a change was made if write_itinerary returned success. If it returned an error, say the change failed (or retry with corrected arguments). Never claim an addition that did not happen. After a successful change, say what you changed and that it can be undone. If the result lists conflicts_with, warn about the overlap.
 3. The itinerary is already listed above: answer plan questions from that list. Call read_itinerary only when you need more than is listed (it can filter by date; a date-only end date covers the whole day).
-4. To add something you MUST call write_itinerary. Reading the itinerary does not change it. Never say you added something unless write_itinerary succeeded."""),
+4. To add something you MUST call write_itinerary. Reading the itinerary does not change it. Never say you added something unless write_itinerary succeeded.
+5. Respond to a request to change the itinerary by making the tool call itself. Never write the call, or a claim that it worked, as text before the tool has run."""),
 }
 
 COMPOSER_RULES = """You are the COMPOSER. Specialist agents have already researched the traveler's question. Merge their answers into one concise reply for a phone screen.

@@ -103,6 +103,7 @@ class OpenAICompatLLM:
         self.model, self.max_tokens, self.provider = model, max_tokens, provider_name
         self.reasoning_effort = reasoning_effort
         self.limits, self._sleep = limits, sleep
+        self._required_ok = True  # flips to False once the server turns out not to honour tool_choice=required
 
     @staticmethod
     def _detail(e: Exception) -> tuple[object, str]:
@@ -181,12 +182,13 @@ class OpenAICompatLLM:
                         await self._sleep(wait)
                 count_request(lim)
             text, calls, finish, started = "", [], None, False  # calls: {id, name, args, index, extra}
+            choice = "required" if force_tool and self._required_ok else openai.NOT_GIVEN
             try:
                 stream = await self.client.chat.completions.create(
                     model=self.model, max_tokens=self.max_tokens, temperature=0.2, stream=True,
                     messages=to_openai_messages(system, messages, gemini=bool(self.reasoning_effort)), tools=to_openai_tools(tools) or openai.NOT_GIVEN,
                     reasoning_effort=self.reasoning_effort or openai.NOT_GIVEN,
-                    tool_choice="required" if force_tool else openai.NOT_GIVEN)
+                    tool_choice=choice)
                 async for chunk in stream:
                     if not chunk.choices:
                         continue
@@ -207,8 +209,16 @@ class OpenAICompatLLM:
                             target["args"] += fn.arguments
                     if ch.finish_reason:
                         finish = ch.finish_reason
+                if choice == "required" and not text and not calls:
+                    # Some servers (vLLM with a Mistral tool parser) accept tool_choice=required but stream nothing back:
+                    # only one tool is offered on a forced step, so plain "auto" is a safe fallback.
+                    self._required_ok = False
+                    continue
                 break
             except openai.OpenAIError as e:
+                if choice == "required" and isinstance(e, openai.BadRequestError):  # the server rejects tool_choice=required
+                    self._required_ok = False
+                    continue
                 delay = None if started else self._retry_delay(e, attempt)  # never retry after output began
                 if delay is None or attempt >= 2:
                     raise self._wrap(e) from e
@@ -217,10 +227,7 @@ class OpenAICompatLLM:
                 await self._sleep(delay)
         blocks = [{"type": "text", "text": text}] if text else []
         for c in calls:
-            try:
-                args = json.loads(c["args"] or "{}")
-            except json.JSONDecodeError:
-                args = {}
+            args = parse_tool_args(c["args"])
             block = {"type": "tool_use", "id": c["id"], "name": c["name"], "input": args if isinstance(args, dict) else {}}
             if c["extra"]:
                 block["extra_content"] = c["extra"]
@@ -269,6 +276,35 @@ def missing_key_message(s: Settings) -> str:
     name = {"gemini": "GEMINI_API_KEY", "openai": "LLM_API_KEY (and LLM_MODEL, LLM_BASE_URL)",
             "anthropic": "ANTHROPIC_API_KEY"}.get(s.llm_provider, "LLM_PROVIDER (gemini, openai or anthropic)")
     return f"{name} is not set. Add it to .env and restart."
+
+
+def parse_tool_args(raw: str) -> object:
+    """Parse streamed tool-call arguments. vLLM's Mistral parser drops the closing quote/braces of the last fragment
+    (`{"title": "Dinner", "start_at": "2026-12-02T20:00:00`), so close an unterminated string and open objects before giving up."""
+    raw = raw or "{}"
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    stack, in_str, esc = [], False, False
+    for ch in raw:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack:
+            stack.pop()
+    try:
+        return json.loads(raw + ('"' if in_str else "") + "".join(reversed(stack)))
+    except json.JSONDecodeError:
+        return {}
 
 
 def parse_extra_headers(raw: str) -> dict[str, str]:
