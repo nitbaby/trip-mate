@@ -130,6 +130,41 @@ def test_docs_agent_answers_directly_with_verified_citation(client, trip, monkey
     assert "Documents agent" not in llm.calls[0]["system"] and "documents agent" in llm.calls[0]["system"]
 
 
+def test_auto_cite_attaches_only_passages_that_support_the_answer():
+    from app.agent.verify import auto_cite
+
+    refs = {1: {"text": "Hotel: Shinjuku Granbell Hotel Check-in: 3:00 PM on 1 December 2026 Check-out: 11:00 AM on 6 December 2026"},
+            2: {"text": "Breakfast is included for up to 2 guests, served daily 6:30 AM to 10:00 AM in the 2nd floor restaurant."},
+            3: {"text": "JAPAN ENTRY RULES: Most prescription medicine may be brought into Japan up to a one-month supply."}}
+    # a real Mistral-7B answer from the eval: right facts, no [n] markers
+    real = ("The check-out time is at 11:00 AM, as stated in the hotel confirmation document. "
+            "Breakfast is included, served daily from 6:30 AM to 10:00 AM in the 2nd floor restaurant.")
+    assert set(auto_cite(real, refs)) == {"1", "2"}                      # both supporting passages, never the unrelated one [3]
+    assert auto_cite("Check-out is at 9:45 PM at the Granbell Hotel.", refs) == []   # a wrong time is not attributed to a passage
+    assert auto_cite("The police number in Japan is 110.", refs) == []   # nothing retrieved supports it
+    assert auto_cite("Sure! Happy to help.", refs) == []                 # too short to attribute
+    assert len(auto_cite(real, refs, limit=1)) == 1
+
+
+def test_answer_without_markers_gets_sources_line_and_no_unsourced_note(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    llm = ScriptedLLM([{"text": "Check-out is 11:00 AM and breakfast is included for up to 2 guests."}])  # no [1], like Mistral
+    ev = chat(client, trip, "What time is check-out, and does the hotel include breakfast?", llm)
+    text = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert text.rstrip().endswith("Sources: [1]") and "Not found in your documents" not in text
+    assert "citation" in types(ev) and next(e for e in ev if e["type"] == "confidence")["level"] == "high"
+    assert next(e for e in ev if e["type"] == "verified") == {"type": "verified", "checked": 1, "unsupported": 0}
+
+
+def test_unsupported_unmarked_answer_is_not_auto_cited(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    llm = ScriptedLLM([{"text": "Check-out is at 9:45 PM and the hotel has a rooftop swimming pool open all night."}])
+    ev = chat(client, trip, "What time is check-out?", llm)
+    text = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert "Sources:" not in text and "citation" not in types(ev)
+    assert next(e for e in ev if e["type"] == "confidence")["level"] == "low" and "Not found in your documents" in text
+
+
 def test_unsupported_citation_is_dropped_and_confidence_lowered(client, trip):
     llm = ScriptedLLM([{"text": "Check-out is at 9:45 PM [1]."}])  # wrong time: not in the passage
     ev = chat(client, trip, "What time is check-out?", llm)

@@ -21,7 +21,7 @@ from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
 from .ratelimit import quota_status
 from .router import ADD_REQUEST, AGENTS, ROUTER_PROMPT, matched_any, parse_intents, route, widen_fallback
-from .verify import JUDGE_PROMPT, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
+from .verify import JUDGE_PROMPT, auto_cite, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
 
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
@@ -430,6 +430,18 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             supported = [m for m in cited if grounded.get(m, False)]
             if cited:
                 yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
+        if not cited and turn.refs and not turn.wrote_itinerary and not NOT_FOUND.search(full_text):
+            # the model wrote no [n] marker at all (small models often don't): attach the passages that really support the
+            # answer, found by the same word/number grounding as the verifier, instead of showing a correct answer as unsourced
+            auto = auto_cite(full_text, turn.refs)
+            if auto:
+                note = "\n\nSources: " + " ".join(f"[{m}]" for m in auto)
+                turn.streamed += note
+                full_text += note
+                yield {"type": "token", "text": note}
+                supported = auto
+                if mode == "multi":
+                    yield {"type": "verified", "checked": len(auto), "unsupported": 0}
         for m in supported:
             r = turn.refs[int(m)]
             yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}
