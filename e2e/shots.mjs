@@ -3,7 +3,7 @@ import { chromium } from "@playwright/test";
 import path from "node:path";
 const out = process.argv[2] ?? "/tmp/tm-ui/shots";
 const BASE = process.env.BASE_URL ?? "http://localhost:5173";
-const samples = path.resolve("../samples");
+const samples = path.resolve("../samples/tokyo");
 const browser = await chromium.launch({ channel: "chrome" });
 const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: "light" });
 const page = await ctx.newPage();

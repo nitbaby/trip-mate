@@ -59,7 +59,7 @@ else:
                                       "end_date": "2026-12-06", "timezone": "Asia/Tokyo"}).json()["id"]
     docs = []
     for f in ["hotel_confirmation.txt", "flight_itinerary.txt", "japan_entry_rules.txt", "tokyo_guide.md"]:
-        with open(ROOT / "samples" / f, "rb") as fh:
+        with open(ROOT / "samples" / "tokyo" / f, "rb") as fh:
             docs.append(c.post(f"/api/trips/{trip}/documents", files={"file": (f, fh)}).json()["id"])
     for d in docs:
         for _ in range(90):

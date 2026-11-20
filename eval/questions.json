@@ -1,5 +1,5 @@
 {
- "description": "TripMate eval set. Facts come from samples/*. Syntax: all=list of entries, each 'a|b' alternatives (case-insensitive, one must appear); none=forbidden substrings; cite=substring of a citation label; tools_any/tools_all; refuse=answer says the info is not available; write={title,start} expects one new agent itinerary item; mock_only=skip value checks when LIVE_MODE=real. Non-write cases must not change the itinerary.",
+ "description": "TripMate eval set. Facts come from samples/tokyo/*. Syntax: all=list of entries, each 'a|b' alternatives (case-insensitive, one must appear); none=forbidden substrings; cite=substring of a citation label; tools_any/tools_all; refuse=answer says the info is not available; write={title,start} expects one new agent itinerary item; mock_only=skip value checks when LIVE_MODE=real. Non-write cases must not change the itinerary.",
  "cases": [
   {
    "id": "hotel-checkout",

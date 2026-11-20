@@ -2,7 +2,7 @@
 
 How to check each module by hand: REST, MCP tools, RAG, Agent, UI, and how to look inside the Chroma store.
 Automated tests (`make test`, `make test-web`) cover much of this; this plan is for a human at the keyboard.
-Expected values below come from the fixtures in `samples/` and `LIVE_MODE=mock`.
+Expected values below come from the fixtures in `samples/tokyo/` and `LIVE_MODE=mock`.
 
 Legend: **Expected** is what you should see. Tick the box when it matches. Anything that differs is a bug (or a doc fix): note the ID.
 
@@ -42,9 +42,9 @@ Base `$B`. Errors have the shape `{"error":{"code","message","retryable"}}`.
 | R-04 | Same with `destinations: []` or missing `name` | **422** `VALIDATION_FAILED` |
 | R-05 | `GET $B/api/trips` and `GET $B/api/trips/$T` | list contains the trip; detail has `itinerary`, `documents` (with `key_facts`) |
 | R-06 | `GET $B/api/trips/nope` | **404** `NOT_FOUND` |
-| R-07 | Upload: `curl -F file=@samples/hotel_confirmation.txt $B/api/trips/$T/documents` | **202** `{id, filename, status:"queued"}` |
+| R-07 | Upload: `curl -F file=@samples/tokyo/hotel_confirmation.txt $B/api/trips/$T/documents` | **202** `{id, filename, status:"queued"}` |
 | R-08 | Poll `GET $B/api/trips/$T/documents/$D/status` every second | `queued` -> `processing` -> **`ready`** with `doc_type` (`confirmation`); `error: null` |
-| R-09 | Upload the 3 other samples (`flight_itinerary.txt`, `japan_entry_rules.txt`, `tokyo_guide.md`) and the PDF `hotel_confirmation.pdf` | all reach `ready`; types: itinerary, rules, guide, confirmation |
+| R-09 | Upload the 3 other samples from `samples/tokyo/` (`flight_itinerary.txt`, `japan_entry_rules.txt`, `tokyo_guide.md`) and the PDF `hotel_confirmation.pdf` | all reach `ready`; types: itinerary, rules, guide, confirmation |
 | R-10 | Upload `x.exe` (unsupported) and an empty `.txt` | `.exe`: **422** `VALIDATION_FAILED` "Only PDF, TXT and MD files are supported". Empty file: 202, then status **`failed`** with `error: "No extractable text found in document"`. Never a 500. |
 | R-11 | `GET $B/api/trips/$T` after R-09 | `documents[*].key_facts`: Check-in 3:00 PM, Check-out 11:00 AM, Hotel; sensitive ones (Passport number, Booking reference, Card number) have `sensitive: true` and **masked** values like `•••••••07` |
 | R-12 | `GET $B/api/documents/$D/facts/<index of Passport>/reveal` | `{"value":"P48213907","reveal_seconds":30}` (raw value only here) |

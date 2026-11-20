@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 
-const samples = path.resolve(import.meta.dirname, "../../samples");
+const samples = path.resolve(import.meta.dirname, "../../samples/tokyo");
 const SAMPLES = ["hotel_confirmation.txt", "flight_itinerary.txt", "japan_entry_rules.txt", "tokyo_guide.md"];
 test.describe.configure({ mode: "serial" });
 
