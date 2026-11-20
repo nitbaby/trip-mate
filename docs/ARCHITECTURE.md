@@ -14,7 +14,7 @@ flowchart TB
     Ingest["<b>Ingestion pipeline</b> (background task per upload)<br/>parse PDF/TXT/MD → chunk ~450 chars → classify + key facts + mask<br/>→ embed (ONNX MiniLM, local)"]
     subgraph Runtime["<b>Agent runtime</b>"]
       direction LR
-      Router["<b>Router</b><br/>rules, no LLM call<br/>(LLM fallback if no rule matches)"]
+      Router["<b>Router</b><br/>one short LLM call<br/>(rule route kept if it fails)"]
       subgraph Spec["<b>Specialist agents</b> (own prompt + tool allowlist, run in parallel when several match)"]
         direction TB
         SD["<b>Documents agent</b><br/>tools: search_docs"]
@@ -103,7 +103,7 @@ flowchart TD
 ```
 
 Rules worth knowing:
-- Router intents: `docs`, `live`, `itinerary`. Rules first, no LLM call. Only when no rule matches at all (`matched_any`), one short tool-less LLM call (`ROUTER_LLM_FALLBACK`, default on, never with the demo provider) picks the intents from the question plus the previous user turn; the reply is filtered to the three known agents and any failure keeps the documents-agent default. The UI shows it as a "router" agent step. Docs-strong words (check-out, rules, visa, medication, ...) always include the documents agent.
+- Router intents: `docs`, `live`, `itinerary`. By default (`ROUTER_MODE=llm`) one short tool-less LLM call routes every question: it picks the intents from the question plus the previous user turn, the reply is filtered to the three known agents, and if the call fails or returns nothing usable the rule route is kept. With `ROUTER_MODE=rules` the rules decide first with no LLM call, and that LLM call is made only when no rule matches at all (`matched_any`, `ROUTER_LLM_FALLBACK`; a failure then keeps the documents-agent default). The demo provider has no model, so it always uses the rules. The UI shows the call as a "router" agent step. A live-only LLM route is widened to documents + live (`widen_fallback`). In rules mode, docs-strong words (check-out, rules, visa, medication, ...) always include the documents agent. Measured on the 56-question eval (routing only, expected routes derived from each case's checks): rules alone cover the needed specialists on 49/56, rules + LLM-on-miss on 56/56, LLM every time on 56/56 (Gemini; Mistral-7B the same coverage), see `scripts/eval_router.py`.
 - Every agent's prompt also lists the traveler's own itinerary (marked as *not a document*, never cited) so plan questions work even when routed elsewhere.
 - Prefetching and forcing exist because small local models sometimes skip a lookup or copy an earlier "not found" reply from the history; a fresh tool result is always in front of the model.
 - Budgets (6 tools per turn, 30 external lookups per conversation), `trip_id` injection and tool allowlists are enforced by the backend, not the model.
@@ -164,7 +164,8 @@ Common behaviour: a process-wide per-minute limiter queues requests (a `waiting`
 |---|---|---|
 | `LLM_PROVIDER` | gemini / openai / anthropic / demo | which model backs the agents |
 | `AGENT_MODE` | multi / single | agent architecture (per-request `agentMode` overrides) |
-| `ROUTER_LLM_FALLBACK` | true / false | ask the LLM to route questions no rule matches (one extra request on a miss) |
+| `ROUTER_MODE` | llm (default) / rules | `llm`: the LLM routes every question (one short extra request; the rule route is kept if it fails). `rules`: rules decide, LLM only on a miss. The demo provider always uses rules |
+| `ROUTER_LLM_FALLBACK` | true / false | only with `ROUTER_MODE=rules`: ask the LLM to route questions no rule matches (one extra request on a miss) |
 | `VERIFIER_LLM_RESCUE` | true / false | one batched LLM check of citations the word-overlap verifier rejected; it can only restore a citation, and every number/time in the statement must still appear in the passage |
 | `LIVE_MODE` | mock / real | fixtures vs Open-Meteo, Frankfurter, Nominatim |
 | `LIVE_FLIGHTS` | mock / real | flights stay mock even in real mode (no real provider; `real` fails clearly) |

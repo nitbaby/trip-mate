@@ -74,6 +74,28 @@ def verify_citations(text: str, refs: dict[int, dict], evidence: list[str] | Non
     return support
 
 
+def auto_cite(text: str, refs: dict[int, dict], min_ratio: float = 0.5, min_words: int = 3, limit: int = 3) -> list[str]:
+    """For answers where the model wrote no [n] marker at all (some small models never do): the markers of the retrieved
+    passages that actually support the answer. A sentence is attributed to the passage that shares the largest share of its
+    content words, provided at least `min_ratio` of them (stricter than the 0.35 used to check markers the model wrote)
+    and every number/time/date in the sentence appears in that passage. Short sentences are ignored. Best-supported first."""
+    best: dict[int, float] = {}
+    for seg in re.split(r"(?<=[.!?])\s+|\n+", text):
+        words = content_words(seg)
+        if len(words) < min_words:
+            continue
+        numbers = [w for w in words if any(c.isdigit() for c in w)]
+        top_n, top_ratio = None, 0.0
+        for n, ref in refs.items():
+            pool = set(content_words(ref["text"]))
+            ratio = sum(w in pool for w in words) / len(words)
+            if ratio >= min_ratio and all(x in pool for x in numbers) and ratio > top_ratio:
+                top_n, top_ratio = n, ratio
+        if top_n is not None:
+            best[top_n] = max(best.get(top_n, 0.0), top_ratio)
+    return [str(n) for n, _ in sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
+
+
 # ---------- optional LLM rescue (rescue-only: it can restore a citation the word-overlap check rejected, never remove one) ----------
 JUDGE_PROMPT = """You check whether numbered passages support statements from a travel assistant's answer.
 For each item, reply true only if the PASSAGE clearly says what the STATEMENT claims (paraphrase is fine; extra detail or a different

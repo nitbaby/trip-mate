@@ -130,6 +130,41 @@ def test_docs_agent_answers_directly_with_verified_citation(client, trip, monkey
     assert "Documents agent" not in llm.calls[0]["system"] and "documents agent" in llm.calls[0]["system"]
 
 
+def test_auto_cite_attaches_only_passages_that_support_the_answer():
+    from app.agent.verify import auto_cite
+
+    refs = {1: {"text": "Hotel: Shinjuku Granbell Hotel Check-in: 3:00 PM on 1 December 2026 Check-out: 11:00 AM on 6 December 2026"},
+            2: {"text": "Breakfast is included for up to 2 guests, served daily 6:30 AM to 10:00 AM in the 2nd floor restaurant."},
+            3: {"text": "JAPAN ENTRY RULES: Most prescription medicine may be brought into Japan up to a one-month supply."}}
+    # a real Mistral-7B answer from the eval: right facts, no [n] markers
+    real = ("The check-out time is at 11:00 AM, as stated in the hotel confirmation document. "
+            "Breakfast is included, served daily from 6:30 AM to 10:00 AM in the 2nd floor restaurant.")
+    assert set(auto_cite(real, refs)) == {"1", "2"}                      # both supporting passages, never the unrelated one [3]
+    assert auto_cite("Check-out is at 9:45 PM at the Granbell Hotel.", refs) == []   # a wrong time is not attributed to a passage
+    assert auto_cite("The police number in Japan is 110.", refs) == []   # nothing retrieved supports it
+    assert auto_cite("Sure! Happy to help.", refs) == []                 # too short to attribute
+    assert len(auto_cite(real, refs, limit=1)) == 1
+
+
+def test_answer_without_markers_gets_sources_line_and_no_unsourced_note(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    llm = ScriptedLLM([{"text": "Check-out is 11:00 AM and breakfast is included for up to 2 guests."}])  # no [1], like Mistral
+    ev = chat(client, trip, "What time is check-out, and does the hotel include breakfast?", llm)
+    text = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert text.rstrip().endswith("Sources: [1]") and "Not found in your documents" not in text
+    assert "citation" in types(ev) and next(e for e in ev if e["type"] == "confidence")["level"] == "high"
+    assert next(e for e in ev if e["type"] == "verified") == {"type": "verified", "checked": 1, "unsupported": 0}
+
+
+def test_unsupported_unmarked_answer_is_not_auto_cited(client, trip, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    llm = ScriptedLLM([{"text": "Check-out is at 9:45 PM and the hotel has a rooftop swimming pool open all night."}])
+    ev = chat(client, trip, "What time is check-out?", llm)
+    text = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert "Sources:" not in text and "citation" not in types(ev)
+    assert next(e for e in ev if e["type"] == "confidence")["level"] == "low" and "Not found in your documents" in text
+
+
 def test_unsupported_citation_is_dropped_and_confidence_lowered(client, trip):
     llm = ScriptedLLM([{"text": "Check-out is at 9:45 PM [1]."}])  # wrong time: not in the passage
     ev = chat(client, trip, "What time is check-out?", llm)
@@ -438,6 +473,56 @@ def test_fallback_is_off_for_the_demo_provider(client, trip, fallback_on, monkey
     monkeypatch.setattr(get_settings(), "llm_provider", "demo")
     llm = ScriptedLLM([{"text": "Not found in your documents."}])
     ev = chat(client, trip, BROLLY, llm)
+    assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
+
+
+@pytest.fixture
+def llm_router(client, monkeypatch):
+    from app.config import get_settings
+    s = get_settings()
+    monkeypatch.setattr(s, "router_mode", "llm")
+    monkeypatch.setattr(s, "llm_provider", "gemini")
+
+
+def test_llm_router_mode_asks_the_llm_even_when_a_rule_matches(client, trip, llm_router, monkeypatch):
+    _hash_friendly_prefetch(monkeypatch)
+    assert matched_any("What time is check-out?") and route("What time is check-out?") == ["docs"]
+    llm = ScriptedLLM([{"text": '{"intents": ["docs"]}'}, {"text": "Check-out is 11:00 AM [1]."}])
+    ev = chat(client, trip, "What time is check-out?", llm)
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "docs"]
+    assert "route questions" in llm.calls[0]["system"] and llm.calls[0]["tools"] == []
+    assert ev[-1]["llmCalls"] == 2  # one extra request for the router
+
+
+def test_llm_router_mode_overrides_the_rules(client, trip, llm_router):
+    """The rules say live for 'rain'; the LLM says itinerary: the LLM wins (and a live-only answer is still widened, as in the fallback)."""
+    assert route("Will it rain on my day trip?") == ["live"]
+    llm = ScriptedLLM([{"text": '{"intents": ["itinerary"]}'}, {"text": "You have nothing planned."}])
+    ev = chat(client, trip, "Will it rain on my day trip?", llm)
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "itinerary"]
+
+
+@pytest.mark.parametrize("reply", [{"text": "no idea"}, {"raise": "llm"}])
+def test_llm_router_mode_failure_keeps_the_rule_route(client, trip, llm_router, reply):
+    from app.agent.llm import LLMError
+    if reply.get("raise"):
+        reply = {"raise": LLMError("rate limited", True)}
+    llm = ScriptedLLM([reply, {"text": "Clear and mild."}])
+    ev = chat(client, trip, "What's the weather in Tokyo?", llm)  # rules: live; an unusable reply must not demote it to docs
+    assert [e["agent"] for e in ev if e["type"] == "agent_start"][:2] == ["router", "live"]
+
+
+def test_default_router_mode_is_llm(client, monkeypatch):
+    from app.config import Settings
+    monkeypatch.delenv("ROUTER_MODE")  # the test fixture pins "rules"; this is the shipped default
+    assert Settings(_env_file=None).router_mode == "llm"
+
+
+def test_demo_provider_always_uses_the_rules_even_in_llm_mode(client, trip, llm_router, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "llm_provider", "demo")
+    llm = ScriptedLLM([{"text": "Not found in your documents."}])
+    ev = chat(client, trip, "What's the weather in Tokyo?", llm)
     assert "router" not in [e.get("agent") for e in ev if e["type"] == "agent_start"]
 
 

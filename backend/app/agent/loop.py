@@ -21,7 +21,7 @@ from .llm import LLMError
 from .prompt import composer_prompt, role_prompt, system_prompt
 from .ratelimit import quota_status
 from .router import ADD_REQUEST, AGENTS, ROUTER_PROMPT, matched_any, parse_intents, route, widen_fallback
-from .verify import JUDGE_PROMPT, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
+from .verify import JUDGE_PROMPT, auto_cite, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
 
 MAX_ITERATIONS = 8
 SPECIALIST_ITERATIONS = 5
@@ -297,10 +297,11 @@ def _prefetch(agent: str, message: str) -> tuple[str, dict] | None:
 
 async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
     """Yields events, then finally {"type": "_intents", "intents": [...]} (internal, not sent to the client).
-    Rules first; the LLM is asked only when no rule matched. Any LLM failure keeps the rules' answer (documents agent)."""
+    Rules first; the LLM is asked only when no rule matched (ROUTER_MODE=llm: asked every time). Any LLM failure keeps the rules' answer."""
     intents = route(user_message)
     s = get_settings()
-    if not (s.router_llm_fallback and s.llm_provider != "demo" and not matched_any(user_message)):
+    always = s.router_mode == "llm"
+    if s.llm_provider == "demo" or not (always or (s.router_llm_fallback and not matched_any(user_message))):
         yield {"type": "_intents", "intents": intents}
         return
     yield {"type": "agent_start", "agent": "router", "label": "Understanding the question"}
@@ -314,7 +315,8 @@ async def _route(turn: Turn, llm, history: list[dict], user_message: str) -> Asy
                 yield {"type": "waiting", **payload, "agent": "router"}
             elif kind == "text":
                 text += payload
-        intents = widen_fallback(parse_intents(text))
+        if not always or re.search(r"\{.*\}", text, re.DOTALL):  # in llm mode an unusable reply keeps the rules' route
+            intents = widen_fallback(parse_intents(text))
     except LLMError:
         pass  # the specialist call will report a real provider problem itself; routing just keeps the default
     yield {"type": "agent_end", "agent": "router"}
@@ -430,6 +432,18 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             supported = [m for m in cited if grounded.get(m, False)]
             if cited:
                 yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
+        if not cited and turn.refs and not turn.wrote_itinerary and not NOT_FOUND.search(full_text):
+            # the model wrote no [n] marker at all (small models often don't): attach the passages that really support the
+            # answer, found by the same word/number grounding as the verifier, instead of showing a correct answer as unsourced
+            auto = auto_cite(full_text, turn.refs)
+            if auto:
+                note = "\n\nSources: " + " ".join(f"[{m}]" for m in auto)
+                turn.streamed += note
+                full_text += note
+                yield {"type": "token", "text": note}
+                supported = auto
+                if mode == "multi":
+                    yield {"type": "verified", "checked": len(auto), "unsupported": 0}
         for m in supported:
             r = turn.refs[int(m)]
             yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}

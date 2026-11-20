@@ -153,6 +153,79 @@ def test_factory_selection():
     assert Settings(_env_file=None).llm_provider == "gemini"  # Gemini is the default
 
 
+@pytest.mark.parametrize("broken", ["empty_stream", "http_400"])
+def test_forced_tool_falls_back_to_auto_when_server_ignores_required(broken):
+    """vLLM + Mistral: tool_choice=required returned an empty stream (or a 400). Retry once with auto, then remember."""
+    import asyncio
+
+    choices = []
+    tool = {"name": "write_itinerary", "description": "d", "input_schema": {"type": "object", "properties": {}}}
+    call = sse({"tool_calls": [{"index": 0, "id": "t1", "type": "function", "function": {"name": "write_itinerary", "arguments": "{}"}}]},
+               finish="tool_calls")
+
+    def handler(req):
+        choice = json.loads(req.content).get("tool_choice")
+        choices.append(choice)
+        if choice == "required":
+            if broken == "http_400":
+                return httpx.Response(400, json={"error": {"message": "bad tool_choice"}})
+            return stream_response(sse({"role": "assistant", "content": ""}, finish=None))  # role chunk, then nothing
+        return stream_response(call)
+
+    async def run():
+        llm = llm_with(handler)
+        outs = []
+        for _ in range(2):
+            outs.append([x async for x in llm.turn("sys", [tool], [{"role": "user", "content": "add dinner"}], force_tool="write_itinerary")])
+        return outs
+
+    first, second = asyncio.run(run())
+    for out in (first, second):
+        final = out[-1][1]
+        assert final["stop_reason"] == "tool_use" and final["content"][0]["name"] == "write_itinerary"
+    assert choices == ["required", None, None]  # the second turn skips the doomed "required" request
+
+
+def test_truncated_streamed_tool_arguments_are_repaired():
+    from app.agent.llm import parse_tool_args
+
+    assert parse_tool_args("") == {}
+    assert parse_tool_args('{"a": 1}') == {"a": 1}
+    # what vLLM's Mistral parser actually streamed: the closing quote and brace never arrive
+    assert parse_tool_args('{"action": "create", "title": "Dinner", "start_at": "2026-12-02T20:00:00') == \
+        {"action": "create", "title": "Dinner", "start_at": "2026-12-02T20:00:00"}
+    assert parse_tool_args('{"n": {"x": [1, 2') == {"n": {"x": [1, 2]}}
+    assert parse_tool_args('{"t": "say \\"hi') == {"t": 'say "hi'}   # escaped quote does not end the string
+    assert parse_tool_args('{"a": ') == {}                          # unrecoverable: same as before, empty arguments
+    assert parse_tool_args("not json") == {}
+
+
+def test_extra_headers_setting_is_parsed_and_sent():
+    from app.agent.llm import parse_extra_headers
+
+    assert parse_extra_headers("") == {}
+    assert parse_extra_headers('{"x-bf-vk": "secret"}') == {"x-bf-vk": "secret"}
+    for bad in ("not json", "[1]", '{"a": 1}'):
+        with pytest.raises(ValueError) as e:
+            parse_extra_headers(bad)
+        assert bad not in str(e.value)  # never echo the value: it may hold a key
+
+    seen = {}
+
+    def handler(req):
+        seen.update(req.headers)
+        return httpx.Response(200, json={"data": []})
+
+    s = Settings(_env_file=None, llm_provider="openai", llm_api_key="k", llm_model="vllm/mistralai/Mistral-7B-Instruct-v0.3",
+                 llm_base_url="http://gw.example/v1", llm_extra_headers='{"x-bf-vk": "secret"}')
+    llm = build_llm(s)
+    llm.client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    import asyncio
+
+    asyncio.run(llm.client.get("/models", cast_to=object))
+    assert seen["x-bf-vk"] == "secret"
+
+
 def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
     """Mock Gemini asks for get_flight_status, then answers using the tool result."""
     from tests.test_agent import chat
