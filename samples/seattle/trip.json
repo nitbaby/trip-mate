@@ -1,0 +1,11 @@
+{
+  "name": "Seattle Jan 2027",
+  "destinations": ["Seattle"],
+  "start_date": "2027-01-14",
+  "end_date": "2027-01-18",
+  "timezone": "America/Los_Angeles",
+  "documents": ["hotel_confirmation.txt", "flight_itinerary.txt", "us_entry_rules.txt", "seattle_guide.md", "harbor_cruise_ticket.txt"],
+  "itinerary": [
+    {"type": "activity", "title": "Puget Sound Harbor Cruise", "start_at": "2027-01-16T10:30:00", "location": "Pier 55, Seattle"}
+  ]
+}

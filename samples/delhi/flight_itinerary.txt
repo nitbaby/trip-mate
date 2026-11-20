@@ -1,0 +1,20 @@
+E-TICKET ITINERARY AND RECEIPT
+
+Passenger: Casey Brooks
+Booking reference: KD52PW
+Passport: 502193268
+
+OUTBOUND
+Flight: AI 2131
+Departs: London Heathrow (LHR) Terminal 2, 9 February 2027, 9:45 PM
+Arrives: Delhi Indira Gandhi (DEL) Terminal 3, 10 February 2027, 12:05 PM
+Class: Economy. Baggage: 2 checked bags of 23 kg each, 1 cabin bag of 8 kg.
+
+RETURN
+Flight: AI 2132
+Departs: Delhi Indira Gandhi (DEL) Terminal 3, 15 February 2027, 11:50 PM
+Arrives: London Heathrow (LHR) Terminal 2, 16 February 2027, 5:40 AM
+
+Check-in closes 60 minutes before departure for international flights. Arrive at Delhi airport at least 3 hours before departure.
+Seat selection and special meals can be changed online until 24 hours before departure.
+Vegetarian meals are served on request; the request must be made at least 24 hours before departure.

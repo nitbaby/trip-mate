@@ -1,0 +1,11 @@
+{
+  "name": "Delhi Feb 2027",
+  "destinations": ["Delhi"],
+  "start_date": "2027-02-09",
+  "end_date": "2027-02-16",
+  "timezone": "Asia/Kolkata",
+  "documents": ["hotel_confirmation.txt", "flight_itinerary.txt", "india_entry_rules.txt", "delhi_guide.md", "agra_train_ticket.txt"],
+  "itinerary": [
+    {"type": "transit", "title": "Taj Day Express to Agra", "start_at": "2027-02-12T06:15:00", "location": "New Delhi station"}
+  ]
+}

@@ -1,0 +1,21 @@
+E-TICKET ITINERARY AND RECEIPT
+
+Passenger: Jordan Lee
+Booking reference: RT7M4D
+Passport: HK4829137
+
+OUTBOUND
+Flight: AC 7731
+Departs: Toronto Pearson (YYZ) Terminal 1, 14 January 2027, 8:15 AM
+Arrives: Seattle-Tacoma (SEA) Main Terminal, 14 January 2027, 10:50 AM
+Class: Economy. Baggage: 1 checked bag of 23 kg, 1 cabin bag of 10 kg.
+US border preclearance is done at Toronto before boarding: arrive at least 3 hours before departure.
+
+RETURN
+Flight: AC 7732
+Departs: Seattle-Tacoma (SEA), 18 January 2027, 2:40 PM
+Arrives: Toronto Pearson (YYZ) Terminal 1, 18 January 2027, 10:05 PM
+
+Check-in closes 60 minutes before departure for international flights.
+Seat selection and special meals can be changed online until 24 hours before departure.
+Changes after departure carry a fee of 150 CAD plus any fare difference.

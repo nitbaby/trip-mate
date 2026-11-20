@@ -1,0 +1,23 @@
+RAIL E-TICKET - AGRA DAY TRIP
+
+PNR: 4829173056
+Passenger: Casey Brooks, passport 502193268
+
+OUTBOUND
+Train: Taj Day Express TD 4107
+Date: Friday 12 February 2027
+Departs: New Delhi (NDLS), 6:15 AM, Platform 2
+Arrives: Agra Cantt (AGC), 8:20 AM
+Class: Chair Car (CC), coach C2, seat 31
+
+RETURN
+Train: Taj Day Express TD 4108
+Date: Friday 12 February 2027
+Departs: Agra Cantt (AGC), 6:10 PM
+Arrives: New Delhi (NDLS), 8:25 PM
+Class: Chair Car (CC), coach C2, seat 31
+
+Fare paid: 1,540 INR for both journeys. Breakfast and tea are served on board and included.
+Carry the passport used for booking: the ID is checked at the platform and on the train.
+Arrive at the station at least 45 minutes before departure. Platform numbers can change; check the board.
+Cancellation: 50 percent refund if cancelled more than 48 hours before departure, nothing after that.

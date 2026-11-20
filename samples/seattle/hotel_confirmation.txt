@@ -1,0 +1,23 @@
+HARBORVIEW PIKE HOTEL - RESERVATION CONFIRMATION
+
+Hotel: Harborview Pike Hotel
+Address: 812 Alder Street, Seattle, WA 98101, USA
+Confirmation number: HV5R8203
+Guest name: Jordan Lee
+Passport: HK4829137
+
+Check-in: 4:00 PM on 14 January 2027
+Check-out: 12:00 PM (noon) on 18 January 2027
+Room: Queen Harbor View, non-smoking, 4 nights
+
+Breakfast is not included. The cafe on the lobby level serves breakfast daily from 6:30 AM to 11:00 AM (about 22 USD).
+Late check-out until 2:00 PM is available for 40 USD, subject to availability.
+Early check-in from 12:00 PM is free when the room is ready; otherwise luggage can be left with the bell desk.
+
+Rate: 189 USD per night plus a destination fee of 32 USD per night. Taxes are extra.
+Parking: valet only, 55 USD per night with in-and-out privileges. The hotel has no self-parking.
+
+Cancellation policy: free cancellation until 6:00 PM local time on 10 January 2027. After that, the first night is charged.
+Wi-Fi is free in all rooms. The front desk is open 24 hours. A fitness room is open 5:00 AM to 10:00 PM.
+
+Payment: guaranteed with card ending 7730. Card number 4716 2093 5518 7302 on file.
