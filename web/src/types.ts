@@ -39,7 +39,7 @@ export type ChatEvent =
   | { type: "itinerary_updated"; itemId: string; action: "created" | "updated" | "deleted"; undoId?: string }
   | { type: "error"; code: string; message: string; retryable: boolean }
   | { type: "waiting"; seconds: number; reason: "rate_limit" | "retry"; agent?: string }
-  | { type: "done"; messageId: string; agentMode?: "single" | "multi"; llmCalls?: number; toolCalls?: number; quota?: { used: number; limit: number } };
+  | { type: "done"; messageId: string; llmCalls?: number; toolCalls?: number; quota?: { used: number; limit: number } };
 
 export interface ToolCall { id: string; name: string; label: string; status: "running" | "ok" | "failed"; summary?: string; agent?: string }
 export interface AgentRun { name: string; label: string; status: "running" | "done" }

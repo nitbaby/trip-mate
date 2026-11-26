@@ -39,8 +39,8 @@ def test_demo_provider_runs_all_five_flows(client, monkeypatch):
     ev = chat(client, tid, "What's the rule for bringing medication into Japan?", llm)
     assert "verify" in types(ev) and "citation" in types(ev)
 
-    ev = chat(client, tid, "Find a vegetarian place near my hotel that's open now.", llm)
-    assert "place(s) found" in next(e for e in ev if e["type"] == "tool_result")["summary"]
+    ev = chat(client, tid, "Find a vegetarian place near the hotel, open now.", llm)
+    assert any("place(s) found" in e["summary"] for e in ev if e["type"] == "tool_result")
 
     ev = chat(client, tid, "Add a dinner reservation at 8 PM to tomorrow's itinerary.", llm)
     up = next(e for e in ev if e["type"] == "itinerary_updated")
@@ -79,7 +79,7 @@ def test_demo_provider_multi_agent_flows_and_compound_question(client, monkeypat
 
     def ask(q):
         evs = []
-        with client.stream("POST", f"/api/trips/{tid}/chat", json={"message": q, "agentMode": "multi"}) as r:
+        with client.stream("POST", f"/api/trips/{tid}/chat", json={"message": q}) as r:
             evs = [_json.loads(line[5:]) for line in r.iter_lines() if line.startswith("data:")]
         return evs
 

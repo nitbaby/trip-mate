@@ -78,7 +78,7 @@ Reading the diagram:
 - **Agent internals** (prefetch, forced write, parallel specialists, verification) are in section 2.
 - **Not built:** offline PWA (service worker, local cache), map screen, real flight provider. Settings still shows "offline not enabled".
 
-## 2. One chat turn (multi mode, `AGENT_MODE=multi`, default)
+## 2. One chat turn (always multi-agent)
 
 ```mermaid
 flowchart TD
@@ -108,8 +108,7 @@ Rules worth knowing:
 - Prefetching and forcing exist because small local models sometimes skip a lookup or copy an earlier "not found" reply from the history; a fresh tool result is always in front of the model.
 - Budgets (6 tools per turn, 30 external lookups per conversation), `trip_id` injection and tool allowlists are enforced by the backend, not the model.
 - Confidence: document confidence comes from retrieval (section 3); an answer built only on live tool data shows no document-confidence badge; itinerary writes skip it too.
-- `AGENT_MODE=single` is the original one-agent loop with all tools (it can skip the document search with small models). A request may override with `agentMode`.
-- `scripts/compare_modes.py` runs both modes on the same questions (time, LLM calls, citations, dropped citations).
+- There is no single-agent mode any more (removed 2026-11-26: one agent with all tools skipped document searches on small models). The prompts of every LLM call are listed in `docs/AGENT_PROMPTS.md`.
 
 ## 3. RAG
 
@@ -163,7 +162,6 @@ Common behaviour: a process-wide per-minute limiter queues requests (a `waiting`
 | Variable | Values | Effect |
 |---|---|---|
 | `LLM_PROVIDER` | gemini / openai / anthropic / demo | which model backs the agents |
-| `AGENT_MODE` | multi / single | agent architecture (per-request `agentMode` overrides) |
 | `ROUTER_MODE` | llm (default) / rules | `llm`: the LLM routes every question (one short extra request; the rule route is kept if it fails). `rules`: rules decide, LLM only on a miss. The demo provider always uses rules |
 | `ROUTER_LLM_FALLBACK` | true / false | only with `ROUTER_MODE=rules`: ask the LLM to route questions no rule matches (one extra request on a miss) |
 | `VERIFIER_LLM_RESCUE` | true / false | one batched LLM check of citations the word-overlap verifier rejected; it can only restore a citation, and every number/time in the statement must still appear in the passage |
@@ -175,4 +173,4 @@ Common behaviour: a process-wide per-minute limiter queues requests (a `waiting`
 
 ## 7. Repository map
 
-`backend/app/` (`routes/`, `services/`, `ingest/`, `agent/` = router, prompt, loop, llm, ratelimit, verify, hub, demo_llm, guardrails; `tools/` = tool implementations and providers; `vectors.py`, `confidence.py`, `db.py`, `config.py`) · `mcp-server/tripmate_mcp/` · `web/src/` (`pages/`, `components/`, `lib/` incl. the SSE reducer, `api/`) · `scripts/` (llm_check, chat_cli, compare_modes, inspect_rag, debug_itinerary, demo_seed, mcp_call, reindex) · `samples/` · `docs/` · `e2e/`.
+`backend/app/` (`routes/`, `services/`, `ingest/`, `agent/` = router, prompt, loop, llm, ratelimit, verify, hub, demo_llm, guardrails; `tools/` = tool implementations and providers; `vectors.py`, `confidence.py`, `db.py`, `config.py`) · `mcp-server/tripmate_mcp/` · `web/src/` (`pages/`, `components/`, `lib/` incl. the SSE reducer, `api/`) · `scripts/` (llm_check, chat_cli, inspect_rag, debug_itinerary, demo_seed, mcp_call, reindex) · `samples/` · `docs/` · `e2e/`.

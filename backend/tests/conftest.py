@@ -9,7 +9,6 @@ os.environ["EMBEDDINGS"] = "hash"
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("TRIPMATE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("EMBEDDINGS", "hash")
-    monkeypatch.setenv("AGENT_MODE", "single")  # the original suite covers single mode; multi has its own tests
     monkeypatch.setenv("VERIFIER_LLM_RESCUE", "false")  # same: the rescue has its own tests
     monkeypatch.setenv("ROUTER_LLM_FALLBACK", "false")  # existing tests script exact LLM turns; the fallback has its own tests
     monkeypatch.setenv("ROUTER_MODE", "rules")  # same: the default (llm) adds a router turn to every question; it has its own tests

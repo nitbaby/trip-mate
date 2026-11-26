@@ -1,6 +1,6 @@
 # TripMate
 
-Mobile-first travel assistant (PWA + FastAPI + RAG + MCP tools). See `docs/` for the spec and overview.
+Mobile-first travel assistant (PWA + FastAPI + RAG + MCP tools). See `docs/` for the spec and overview; the LLM prompts are in `docs/AGENT_PROMPTS.md`.
 
 ## Layout
 `backend/` API, ingestion, RAG, agent · `mcp-server/` tool server · `web/` React PWA · `samples/` demo docs · `eval/` · `e2e/` · `scripts/`
@@ -13,7 +13,6 @@ make dev-backend    # http://localhost:8000/docs
 make web-install && make dev-web   # PWA at http://localhost:5173 (needs Node 22; proxies /api to :8000)
 make dev-backend-demo   # chat without any API key: deterministic stand-in model (not an AI), for demos/tests
 make test && make test-web
-.venv/bin/python scripts/compare_modes.py <trip_id>   # single vs multi-agent (use a demo backend, or --yes for real LLM)
 ```
 
 ## Run with a local model (no cloud LLM)
@@ -32,7 +31,7 @@ LLM_API_KEY=local
 ```
 **Other model:** Llama 3.1 8B Instruct is also supported (`make local-model LOCAL_MODEL=llama31`, `make local-llm LOCAL_MODEL=llama31 PORT=8081`, then `LLM_MODEL=llama3.1-8b` and port 8081 in `.env`). It is faster (9-16 s) but clearly weaker in our six-question test (about 3 of 6 good vs 5 of 6 for Qwen3-8B), so Qwen3-8B is the recommended default.
 
-Expect roughly 6-20 s per answer. Tool calling works in multi-agent mode (the default). Single-agent mode is less reliable on a small model (it can skip the document search), so keep `AGENT_MODE=multi`.
+Expect roughly 6-20 s per answer. The app always runs in multi-agent mode (router, specialists, verifier), which is what makes small models reliable: they are not left to skip the document search.
 
 ## Quality checks
 ```

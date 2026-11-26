@@ -30,7 +30,7 @@ export default defineConfig({
       url: "http://localhost:8010/api/health",
       reuseExistingServer: false,
       timeout: 60_000,
-      env: { TRIPMATE_DATA_DIR: dataDir, LLM_PROVIDER: "demo", LIVE_MODE: "mock", AGENT_MODE: "multi" },
+      env: { TRIPMATE_DATA_DIR: dataDir, LLM_PROVIDER: "demo", LIVE_MODE: "mock" },
     },
     {
       command: "npx vite --port 5180 --strictPort",

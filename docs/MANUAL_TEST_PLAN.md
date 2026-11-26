@@ -187,8 +187,8 @@ Needs an LLM (section 0). Per-question expectations assume the sample documents 
 ### 4.3 Modes and providers
 | ID | Check | Expected |
 |---|---|---|
-| A-30 | `AGENT_MODE=multi` vs request `{"agentMode":"single"}` | single: one agent with all tools (can skip the document search with small models); multi: router -> specialists -> composer -> verifier |
-| A-31 | `scripts/compare_modes.py $T --url $B --yes` | table of seconds, LLM calls, citations, verifier drops per mode (uses real LLM calls/quota: demo provider needs no `--yes`) |
+| A-30 | any chat question | always multi-agent: `agent_start` events for router (LLM router mode) / specialists, then verifier events; there is no single-agent mode |
+| A-31 | (removed: `compare_modes.py` compared single vs multi) | |
 | A-32 | `LLM_PROVIDER=demo` | deterministic answers; **banner/label it as a stand-in, not an AI** |
 | A-33 | Gemini rate limit (set `LLM_MAX_RPM=3` and ask a compound question) | amber "waiting for the assistant's rate limit" banner, then the answer (**not yet visually verified in the UI**) |
 | A-34 | Stop the LLM server (local model) and ask | readable error with a retry hint, no crash |

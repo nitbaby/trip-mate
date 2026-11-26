@@ -28,7 +28,7 @@ def trip(client):
 def chat(client, tid, message, llm, cid=None):
     client.app.state.llm = llm
     events = []
-    with client.stream("POST", f"/api/trips/{tid}/chat", json={"message": message, "conversationId": cid, "agentMode": "multi"}) as r:
+    with client.stream("POST", f"/api/trips/{tid}/chat", json={"message": message, "conversationId": cid}) as r:
         assert r.status_code == 200
         for line in r.iter_lines():
             if line.startswith("data:"):
@@ -124,7 +124,7 @@ def test_docs_agent_answers_directly_with_verified_citation(client, trip, monkey
     assert next(e for e in ev if e["type"] == "verified") == {"type": "verified", "checked": 1, "unsupported": 0}
     assert "citation" in t and next(e for e in ev if e["type"] == "confidence")["level"] == "high"
     done = ev[-1]
-    assert done["agentMode"] == "multi" and done["llmCalls"] == 1 and done["toolCalls"] == 1  # prefetched search, no router/composer calls
+    assert done["llmCalls"] == 1 and done["toolCalls"] == 1  # prefetched search, no router/composer calls
     # the docs agent only sees its own tool, with a role-specific prompt
     assert [t["name"] for t in llm.calls[0]["tools"]] == ["search_docs"]
     assert "Documents agent" not in llm.calls[0]["system"] and "documents agent" in llm.calls[0]["system"]
@@ -254,19 +254,6 @@ def test_failure_in_one_specialist_ends_the_turn_with_an_error(client, trip):
     assert ev[-1]["type"] == "error" and ev[-1]["retryable"] is True and "done" not in types(ev)
 
 
-def test_multi_is_the_default_mode_and_single_still_available(client, trip, monkeypatch):
-    from app import config
-
-    monkeypatch.delenv("AGENT_MODE", raising=False)
-    config.get_settings.cache_clear()
-    assert config.get_settings().agent_mode == "multi"
-    client.app.state.llm = ScriptedLLM([{"text": "hello"}])
-    with client.stream("POST", f"/api/trips/{trip}/chat", json={"message": "hi", "agentMode": "single"}) as r:
-        evs = [json.loads(line[5:]) for line in r.iter_lines() if line.startswith("data:")]
-    assert evs[-1]["agentMode"] == "single" and "agent_start" not in types(evs)
-    assert client.post(f"/api/trips/{trip}/chat", json={"message": "hi", "agentMode": "bogus"}).status_code == 422
-
-
 # ---------- small-model safeguards ----------
 def test_docs_agent_searches_even_if_the_model_would_not(client, trip):
     llm = ScriptedLLM([{"text": "I couldn't find it in your documents."}])
@@ -292,6 +279,40 @@ def test_claiming_a_change_without_any_write_gets_a_warning(client, trip):
     llm = ScriptedLLM([{"tools": [("read_itinerary", {})]}, {"text": "I've added dinner at 8 PM to your itinerary."}])
     ev = chat(client, trip, "Add dinner at 8 PM tomorrow to my itinerary", llm)
     assert "NOT changed" in "".join(e["text"] for e in ev if e["type"] == "token")
+
+
+def test_an_add_request_that_writes_nothing_is_flagged_even_if_the_text_does_not_claim_it(client, trip):
+    """Seen with Mistral-7B: it printed the call as text ("write_itinerary(...)") and described the change without making it."""
+    llm = ScriptedLLM([{"text": 'I will create it:\n```\nwrite_itinerary(action="create", title="India Gate")\n```'}] * 5)
+    ev = chat(client, trip, "Can you add a plan for India Gate visit at 4 pm on Feb 10th?", llm)
+    assert "NOT changed" in "".join(e["text"] for e in ev if e["type"] == "token")
+    assert client.get(f"/api/trips/{trip}/itinerary").json() == []
+
+
+def test_an_empty_model_reply_is_reported_not_saved_as_blank(client, trip):
+    """Seen with a gateway that streamed nothing back: the user got an empty message and no explanation."""
+    llm = ScriptedLLM([{"text": ""}] * 3)
+    ev = chat(client, trip, "Can you add a plan for India Gate visit at 4 pm on Feb 10th?", llm, cid="empty1")
+    said = "".join(e["text"] for e in ev if e["type"] == "token")
+    assert "returned no answer" in said and "NOT changed" in said and ev[-1]["type"] == "done"
+    msgs = client.get(f"/api/trips/{trip}/conversations/empty1/messages").json()
+    assert msgs[-1]["role"] == "assistant" and "returned no answer" in msgs[-1]["content"]
+    ev = chat(client, trip, "What is the meaning of life?", ScriptedLLM([{"text": ""}] * 3))
+    assert "returned no answer" in "".join(e["text"] for e in ev if e["type"] == "token")
+
+
+def test_failed_add_attempts_are_not_sent_back_to_the_model(client, trip):
+    """Found live with Mistral-7B: after a failed add, every retry in the same chat copied the earlier failed reply."""
+    chat(client, trip, "Can you add a plan for India Gate visit at 4 pm on Feb 10th?", ScriptedLLM([{"text": ""}] * 5), cid="retry1")
+    llm = ScriptedLLM([{"tools": [("write_itinerary", {"action": "create", "type": "activity", "title": "Sarojini Market",
+                                                      "start_at": "2026-12-03T10:00:00"})]},
+                       {"text": "Added Sarojini Market."}])
+    ev = chat(client, trip, "Can you add a plan for Sarojini Market visit on Dec 3rd?", llm, cid="retry1")
+    sent = json.dumps(llm.calls[0]["messages"])
+    assert "India Gate" not in sent and "returned no answer" not in sent  # the failed exchange is not in the model's context
+    assert any(e["type"] == "itinerary_updated" for e in ev)
+    shown = client.get(f"/api/trips/{trip}/conversations/retry1/messages").json()
+    assert any("returned no answer" in m["content"] for m in shown)  # but the user still sees it
 
 
 def test_a_real_write_has_no_warning(client, trip):

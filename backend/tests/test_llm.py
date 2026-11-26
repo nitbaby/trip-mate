@@ -226,8 +226,9 @@ def test_extra_headers_setting_is_parsed_and_sent():
     assert seen["x-bf-vk"] == "secret"
 
 
-def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
+def test_full_chat_turn_through_gemini_adapter_and_real_tools(client, monkeypatch):
     """Mock Gemini asks for get_flight_status, then answers using the tool result."""
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: None)  # script the model's own calls (prefetch is tested in test_multi.py)
     from tests.test_agent import chat
 
     tid = client.post("/api/trips", json={"name": "T", "destinations": ["Tokyo"], "start_date": "2026-11-30",
@@ -248,7 +249,7 @@ def test_full_chat_turn_through_gemini_adapter_and_real_tools(client):
 
     ev = chat(client, tid, "Is my 6 PM flight delayed?", llm_with(handler))
     types = [e["type"] for e in ev]
-    assert types[:3] == ["token", "tool_start", "tool_result"] and types[-1] == "done"
+    assert types[:4] == ["agent_start", "token", "tool_start", "tool_result"] and types[-1] == "done"
     assert next(e for e in ev if e["type"] == "tool_result")["summary"] == "JL44 delayed by 35 min"
     # tools sent to Gemini carry no trip_id and no unsupported schema keywords
     sent = json.dumps(requests[0]["tools"])

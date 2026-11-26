@@ -130,7 +130,7 @@ Say: "The assistant uses these same seven tools over the Model Context Protocol;
 
 **E4. Plans you typed yourself.** Add "Japanese Garden Visit" on 1 Dec at 10:00 in the Itinerary tab, then ask `What are my travel plans?` -> it lists it (the itinerary is not a document, and is never cited as one).
 
-**E5. Single vs multi agent.** `scripts/compare_modes.py <trip> --url http://localhost:8010 --yes` (about 2-3 minutes on the local model; uses LLM quota on Gemini). Shows seconds, LLM calls, citations and verifier drops per mode.
+**E5. Agent steps.** Ask a compound question (`Is my 6 PM flight delayed, and what time is check-out?`) and watch the agent headers: router, then the documents and live agents in parallel, then the composer, then "N sources checked" from the verifier.
 
 **E6. Dark mode and phone size.** Toggle OS dark mode; resize between 375 px and desktop.
 

@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     conf_agree: float = 0.35   # top >= this AND a second hit >= conf_low from the same document counts as high
     conf_sibling_margin: float = 0.10  # same-document chunks this far below conf_low are still returned
     conf_low: float = 0.18     # below this nothing is returned and confidence is "none"
-    agent_mode: str = "multi"  # multi (router + specialists + verifier) | single (one agent, all tools)
     # When no routing rule matches a question, ask the LLM which specialists to use (one short extra request, only on a miss).
     # Never used with LLM_PROVIDER=demo. Any failure falls back to the documents agent, the same as without it.
     router_llm_fallback: bool = True

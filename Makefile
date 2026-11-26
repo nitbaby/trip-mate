@@ -88,7 +88,7 @@ demo-reset:
 	rm -rf $(DEMO_DIR)
 
 demo-backend:
-	cd backend && TRIPMATE_DATA_DIR=$(DEMO_DIR) LIVE_MODE=mock AGENT_MODE=multi $(DEMO_ENV) ../$(PY)/uvicorn app.main:app --port 8010
+	cd backend && TRIPMATE_DATA_DIR=$(DEMO_DIR) LIVE_MODE=mock $(DEMO_ENV) ../$(PY)/uvicorn app.main:app --port 8010
 
 demo-web:
 	cd web && PATH=$(NODE22):$$PATH VITE_API_TARGET=http://localhost:8010 npx vite --port 5180

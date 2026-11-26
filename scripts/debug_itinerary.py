@@ -16,7 +16,7 @@ trip_id = sys.argv[1]
 question = sys.argv[2] if len(sys.argv) > 2 else "What is the itinerary for this trip?"
 s = get_settings()
 host = urlparse(s.llm_base_url).netloc if s.llm_provider == "openai" else "-"
-print(f"provider={s.llm_provider} model={s.llm_model or s.gemini_model} host={host} agent_mode={s.agent_mode} data_dir={s.tripmate_data_dir}")
+print(f"provider={s.llm_provider} model={s.llm_model or s.gemini_model} host={host} data_dir={s.tripmate_data_dir}")
 with connect() as c:
     trip = c.execute("SELECT * FROM trips WHERE id=?", (trip_id,)).fetchone()
     if not trip:

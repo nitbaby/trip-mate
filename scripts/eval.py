@@ -1,7 +1,7 @@
 """Run the TripMate eval set (eval/questions.json) against a running backend and score every answer.
 
   .venv/bin/python scripts/eval.py [--url http://localhost:8010] [--only CATEGORY_OR_ID_SUBSTRING] [--label qwen3-8b]
-                                   [--agent-mode multi|single] [--trip TRIP_ID] [--out eval/results/NAME.json]
+                                   [--trip TRIP_ID] [--out eval/results/NAME.json]
 
 It creates its OWN trip (name "EVAL ...") with the four sample documents and one itinerary item, so run it against a
 throwaway backend started with its own data dir (see docs/EVAL.md). It refuses :8000 (your data) unless --force.
@@ -29,7 +29,6 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--url", default="http://localhost:8010")
 ap.add_argument("--only", help="comma-separated substrings of case ids or categories, e.g. hotel,live-delay")
 ap.add_argument("--label", default="run", help="name for this run (model), used in the result file name")
-ap.add_argument("--agent-mode", choices=["multi", "single"])
 ap.add_argument("--trip", help="reuse this trip instead of creating one (must have the sample documents)")
 ap.add_argument("--out")
 ap.add_argument("--force", action="store_true", help="allow port 8000 (your own data)")
@@ -77,8 +76,6 @@ def itinerary() -> list[dict]:
 
 def ask(q: str) -> dict:
     body = {"message": q, "conversationId": uuid.uuid4().hex[:12]}
-    if a.agent_mode:
-        body["agentMode"] = a.agent_mode
     t0, ev = time.time(), []
     with httpx.stream("POST", f"{a.url}/api/trips/{trip}/chat", timeout=600, json=body) as r:
         if r.status_code != 200:
@@ -145,9 +142,9 @@ for cat, (p, n) in by.items():
     print(f"{cat:<18}{p}/{n}")
 secs = [r["secs"] for r in results]
 print(f"\nTOTAL {tot}/{len(results)} passed · mean {sum(secs) / max(len(secs), 1):.1f}s · max {max(secs, default=0):.0f}s · "
-      f"{sum(r['llm'] for r in results)} LLM calls · agent_mode={a.agent_mode or 'server default'}")
+      f"{sum(r['llm'] for r in results)} LLM calls")
 out = Path(a.out) if a.out else ROOT / "eval" / "results" / f"{a.label}-{time.strftime('%Y%m%d-%H%M')}.json"
 out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps({"label": a.label, "health": health, "agent_mode": a.agent_mode, "trip": trip, "passed": tot,
+out.write_text(json.dumps({"label": a.label, "health": health, "trip": trip, "passed": tot,
                            "total": len(results), "results": results}, indent=1))
 print(f"wrote {out}")

@@ -14,6 +14,12 @@ RULES = (b"JAPAN ENTRY RULES: MEDICATION AND CUSTOMS\nMost prescription medicine
 Q_HOTEL = "Check-out 11:00 AM Breakfast included hotel check-in time"
 
 
+@pytest.fixture(autouse=True)
+def no_prefetch(monkeypatch):
+    """These tests script the model's own tool calls turn by turn; the app's prefetch (tested in test_multi.py) would add one."""
+    monkeypatch.setattr("app.agent.loop._prefetch", lambda agent, msg: None)
+
+
 @pytest.fixture
 def trip(client):
     tid = client.post("/api/trips", json={"name": "Tokyo", "destinations": ["Tokyo"], "start_date": "2026-11-30",
@@ -46,7 +52,7 @@ def test_flow1_cited_answer(client, trip):
     llm = ScriptedLLM([{"tools": [("search_docs", {"query": Q_HOTEL})]},
                        {"text": "Check-out is 11:00 AM and breakfast is included [1]."}])
     ev = chat(client, trip, "What time is check-out and is breakfast included?", llm)
-    assert types(ev)[0] == "tool_start" and "token" in types(ev) and types(ev)[-1] == "done"
+    assert types(ev)[0] == "agent_start" and "token" in types(ev) and types(ev)[-1] == "done"
     tr = next(e for e in ev if e["type"] == "tool_result")
     assert tr["ok"] and "confidence high" in tr["summary"]
     cit = next(e for e in ev if e["type"] == "citation")
@@ -144,9 +150,9 @@ def test_external_budget_per_session(client, trip, monkeypatch):
     monkeypatch.setenv("MAX_EXTERNAL_CALLS_PER_SESSION", "2")
     config.get_settings.cache_clear()
     one = {"tools": [("convert_currency", {"amount": 1, "from_currency": "USD", "to_currency": "JPY"})]}
-    ev = chat(client, trip, "a", ScriptedLLM([one, {"text": "x"}]), cid="sess")
-    ev += chat(client, trip, "b", ScriptedLLM([one, {"text": "x"}]), cid="sess")
-    ev += chat(client, trip, "c", ScriptedLLM([one, {"text": "x"}]), cid="sess")
+    ev = chat(client, trip, "convert 1 USD to JPY (a)", ScriptedLLM([one, {"text": "x"}]), cid="sess")
+    ev += chat(client, trip, "convert 1 USD to JPY (b)", ScriptedLLM([one, {"text": "x"}]), cid="sess")
+    ev += chat(client, trip, "convert 1 USD to JPY (c)", ScriptedLLM([one, {"text": "x"}]), cid="sess")
     assert [e["ok"] for e in ev if e["type"] == "tool_result"] == [True, True, False]
 
 

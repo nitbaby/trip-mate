@@ -18,7 +18,7 @@ from ..db import connect, new_id, now_iso
 from ..services.itinerary import list_items
 from .guardrails import EXTERNAL_TOOLS, LABELS, summarize, verify_reason
 from .llm import LLMError
-from .prompt import composer_prompt, role_prompt, system_prompt
+from .prompt import composer_prompt, role_prompt
 from .ratelimit import quota_status
 from .router import ADD_REQUEST, AGENTS, ROUTER_PROMPT, matched_any, parse_intents, route, widen_fallback
 from .verify import JUDGE_PROMPT, auto_cite, failed_claims, judge_input, numbers_present, parse_verdicts, verify_citations
@@ -68,7 +68,25 @@ def _load_conversation(conn, trip_id: str, conversation_id: str) -> list[dict]:
         conn.execute("INSERT INTO conversations VALUES (?,?,?)", (conversation_id, trip_id, now_iso()))
     rows = conn.execute("""SELECT role, content FROM messages WHERE conversation_id=?
                            ORDER BY rowid DESC LIMIT ?""", (conversation_id, HISTORY_LIMIT)).fetchall()
-    return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    msgs = [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    return _without_failed_turns(msgs)
+
+
+FAILED_TURN = re.compile(r"The itinerary was NOT changed|The assistant returned no answer")
+
+
+def _without_failed_turns(msgs: list[dict]) -> list[dict]:
+    """Small models copy their own earlier replies: after a failed 'add' (a reply that ends with our NOT-changed or no-answer
+    warning) every retry in the same chat repeated the failure. The failed question and its reply stay in the stored chat
+    (the user sees them) but are not sent back to the model."""
+    out: list[dict] = []
+    for m in msgs:
+        if m["role"] == "assistant" and FAILED_TURN.search(m["content"] or ""):
+            if out and out[-1]["role"] == "user":
+                out.pop()  # the question that led to the failed reply
+            continue
+        out.append(m)
+    return out
 
 
 def _save(conn, conversation_id, role, content) -> str:
@@ -245,14 +263,6 @@ async def _merge(gens: list[AsyncIterator[dict]]) -> AsyncIterator[dict]:
             t.cancel()
 
 
-async def _answer_single(turn: Turn, llm, history: list[dict], user_message: str) -> AsyncIterator[dict]:
-    out: dict = {}
-    msgs = [*history, {"role": "user", "content": user_message}]
-    async for ev in run_agent(turn, llm, agent=None, system=system_prompt(turn.trip, prefs=turn.prefs, itinerary=turn.itinerary), allowed=None,
-                              messages=msgs, stream_text=True, out=out, force_first_tool=_force(None, user_message)):
-        yield ev
-
-
 def _itinerary(conn, trip_id: str) -> list[dict] | None:
     try:
         return list_items(conn, trip_id)
@@ -385,10 +395,8 @@ async def _answer_multi(turn: Turn, llm, history: list[dict], user_message: str)
     yield {"type": "agent_end", "agent": "composer"}
 
 
-async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub, prefs: dict | None = None,
-                   mode: str | None = None) -> AsyncIterator[dict]:
+async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, hub, prefs: dict | None = None) -> AsyncIterator[dict]:
     s = get_settings()
-    mode = mode if mode in ("single", "multi") else s.agent_mode
     conn = connect()
     saved_assistant = False
     turn = None
@@ -402,11 +410,16 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             return
         turn = Turn(trip=trip, conversation_id=conversation_id, conn=conn, hub=hub, tools=tools, with_trip=with_trip, prefs=prefs,
                     itinerary=_itinerary(conn, trip["id"]))
-        answer = _answer_multi if mode == "multi" else _answer_single
-        async for ev in answer(turn, llm, history, user_message):
+        async for ev in _answer_multi(turn, llm, history, user_message):
             yield ev
         claims_change = bool(CHANGE_CLAIM.search(turn.streamed))
-        if not turn.wrote_itinerary and (turn.failed_write or claims_change):
+        asked_to_add = bool(ADD_REQUEST.search(user_message))  # an explicit "add ..." that wrote nothing is always a failure, whatever the text says
+        if not turn.streamed.strip() and not turn.wrote_itinerary:  # the model (or its server) returned nothing at all
+            note = ("⚠️ The assistant returned no answer"
+                    + (", so the itinerary was NOT changed. Please try again, or add it in the Itinerary tab." if asked_to_add else ". Please try again."))
+            turn.streamed += note
+            yield {"type": "token", "text": note}
+        elif not turn.wrote_itinerary and (turn.failed_write or claims_change or asked_to_add):
             note = ("\n\n⚠️ The itinerary was NOT changed: the update failed. Please try again with the day, time and a title."
                     if turn.failed_write else
                     "\n\n⚠️ The itinerary was NOT changed: no update was made. Please try again.")
@@ -414,24 +427,22 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             yield {"type": "token", "text": note}
         full_text = turn.streamed
 
-        # citations: only markers the model used that map to a real passage (and, in multi mode, are grounded)
+        # citations: only markers the model used that map to a real passage (and are grounded)
         cited = []
         for m in re.findall(r"\[(\d+)\]", full_text):
             if int(m) in turn.refs and m not in cited:
                 cited.append(m)
-        supported = cited
-        if mode == "multi":
-            grounded = verify_citations(full_text, turn.refs, turn.evidence)
-            failed = [m for m in cited if not grounded.get(m, False)]
-            if failed and s.verifier_llm_rescue and s.llm_provider != "demo":
-                async for ev in _rescue(turn, llm, full_text, failed):
-                    if ev["type"] == "_rescued":
-                        grounded = {**grounded, **{m: True for m in ev["markers"]}}
-                    else:
-                        yield ev
-            supported = [m for m in cited if grounded.get(m, False)]
-            if cited:
-                yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
+        grounded = verify_citations(full_text, turn.refs, turn.evidence)
+        failed = [m for m in cited if not grounded.get(m, False)]
+        if failed and s.verifier_llm_rescue and s.llm_provider != "demo":
+            async for ev in _rescue(turn, llm, full_text, failed):
+                if ev["type"] == "_rescued":
+                    grounded = {**grounded, **{m: True for m in ev["markers"]}}
+                else:
+                    yield ev
+        supported = [m for m in cited if grounded.get(m, False)]
+        if cited:
+            yield {"type": "verified", "checked": len(cited), "unsupported": len(cited) - len(supported)}
         if not cited and turn.refs and not turn.wrote_itinerary and not NOT_FOUND.search(full_text):
             # the model wrote no [n] marker at all (small models often don't): attach the passages that really support the
             # answer, found by the same word/number grounding as the verifier, instead of showing a correct answer as unsourced
@@ -442,8 +453,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
                 full_text += note
                 yield {"type": "token", "text": note}
                 supported = auto
-                if mode == "multi":
-                    yield {"type": "verified", "checked": len(auto), "unsupported": 0}
+                yield {"type": "verified", "checked": len(auto), "unsupported": 0}
         for m in supported:
             r = turn.refs[int(m)]
             yield {"type": "citation", "marker": f"[{m}]", "docId": r["docId"], "chunkId": r["chunkId"], "label": r["label"]}
@@ -464,7 +474,7 @@ async def run_turn(*, trip: dict, conversation_id: str, user_message: str, llm, 
             yield {"type": "verify", "reason": reason}
         mid = _save(conn, conversation_id, "assistant", full_text)
         saved_assistant = True
-        done = {"type": "done", "messageId": mid, "agentMode": mode, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
+        done = {"type": "done", "messageId": mid, "llmCalls": turn.llm_calls, "toolCalls": turn.tool_count}
         try:
             quota = quota_status(s)
         except Exception:  # noqa: BLE001 - a quota read must never break an answer
